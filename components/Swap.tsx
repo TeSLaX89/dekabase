@@ -15,6 +15,9 @@ const TOKENS = [
   { symbol: 'WETH', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
 ]
 
+const SELECT_CLASS =
+  'rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-white outline-none'
+
 export function Swap() {
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
@@ -28,7 +31,7 @@ export function Swap() {
   const [error, setError] = useState('')
   const [slippage, setSlippage] = useState(0.5)
   const [showSettings, setShowSettings] = useState(false)
-  const [sellBalanceRaw, setSellBalanceRaw] = useState<bigint>(0n)
+  const [sellBalanceRaw, setSellBalanceRaw] = useState<bigint>(BigInt(0))
   const [sellBalanceFormatted, setSellBalanceFormatted] = useState('0')
   const scoredRef = useRef<string | null>(null)
 
@@ -40,7 +43,7 @@ export function Swap() {
   useEffect(() => {
     const loadBalance = async () => {
       if (!address || !publicClient) {
-        setSellBalanceRaw(0n)
+        setSellBalanceRaw(BigInt(0))
         setSellBalanceFormatted('0')
         return
       }
@@ -61,7 +64,7 @@ export function Swap() {
           setSellBalanceFormatted(formatUnits(bal as bigint, sellToken.decimals))
         }
       } catch {
-        setSellBalanceRaw(0n)
+        setSellBalanceRaw(BigInt(0))
         setSellBalanceFormatted('0')
       }
     }
@@ -70,12 +73,12 @@ export function Swap() {
   }, [address, sellToken, publicClient])
 
   const setPercentage = (percent: number) => {
-    if (sellBalanceRaw === 0n) return
+    if (!isConnected || sellBalanceRaw === BigInt(0)) return
     if (percent === 100) {
       setSellAmount(sellBalanceFormatted)
       return
     }
-    const raw = (sellBalanceRaw * BigInt(percent)) / 100n
+    const raw = (sellBalanceRaw * BigInt(percent)) / BigInt(100)
     setSellAmount(formatUnits(raw, sellToken.decimals))
   }
 
@@ -104,8 +107,16 @@ export function Swap() {
       const res = await fetch(`/api/swap/quote?${params}`)
       const data = await res.json()
 
-      if (data.validationErrors || data.name === 'ERROR_CODE' || data.code || data.error || !data.buyAmount) {
-        setError(data.validationErrors?.[0]?.reason || data.message || data.error || 'Quote failed')
+      if (
+        data.validationErrors ||
+        data.name === 'ERROR_CODE' ||
+        data.code ||
+        data.error ||
+        !data.buyAmount
+      ) {
+        setError(
+          data.validationErrors?.[0]?.reason || data.message || data.error || 'Quote failed'
+        )
         setQuote(null)
         return
       }
@@ -129,7 +140,7 @@ export function Swap() {
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [sellAmount, sellToken, buyToken, address, slippage])
+  }, [sellAmount, sellToken, buyToken, address, slippage, isBase])
 
   useEffect(() => {
     if (isSuccess && txHash && address && scoredRef.current !== txHash) {
@@ -148,11 +159,11 @@ export function Swap() {
   }, [isSuccess, txHash, address])
 
   const handleSwap = () => {
-    if (!quote?.transaction) return
+    if (!isConnected || !isBase || !quote?.transaction) return
 
     sendTransaction({
-      to: quote.transaction.to,
-      data: quote.transaction.data,
+      to: quote.transaction.to as `0x${string}`,
+      data: quote.transaction.data as `0x${string}`,
       value: quote.transaction.value ? BigInt(quote.transaction.value) : undefined,
     })
   }
@@ -176,34 +187,26 @@ export function Swap() {
   const rate =
     quote?.buyAmount && sellAmount && Number(sellAmount) > 0
       ? (
-          Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)) /
-          Number(sellAmount)
+          Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)) / Number(sellAmount)
         ).toFixed(6)
       : null
 
-  const minReceived =
-    quote?.buyAmount
-      ? (
-          Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)) *
-          (1 - slippage / 100)
-        ).toFixed(6)
-      : null
+  const minReceived = quote?.buyAmount
+    ? (
+        Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)) *
+        (1 - slippage / 100)
+      ).toFixed(6)
+    : null
 
-  if (!isConnected) {
-    return (
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center">
-        <p className="text-gray-400">Please connect your wallet</p>
-      </div>
-    )
-  }
-
-  if (!isBase) {
-    return (
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center">
-        <p className="text-amber-200">Please switch to Base Mainnet</p>
-      </div>
-    )
-  }
+  const buttonLabel = !isConnected
+    ? 'Connect wallet'
+    : !isBase
+      ? 'Switch to Base Mainnet'
+      : isPending || isConfirming
+        ? 'Confirming...'
+        : loading
+          ? 'Finding best price...'
+          : 'Swap'
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
@@ -252,9 +255,11 @@ export function Swap() {
             <span>You pay</span>
             <span>
               Balance:{' '}
-              {Number(sellBalanceFormatted).toLocaleString(undefined, {
-                maximumFractionDigits: 6,
-              })}
+              {isConnected
+                ? Number(sellBalanceFormatted).toLocaleString(undefined, {
+                    maximumFractionDigits: 6,
+                  })
+                : '—'}
             </span>
           </div>
 
@@ -272,10 +277,10 @@ export function Swap() {
                 const t = TOKENS.find((x) => x.symbol === e.target.value)
                 if (t) setSellToken(t)
               }}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none"
+              className={SELECT_CLASS}
             >
               {TOKENS.map((t) => (
-                <option key={t.symbol} value={t.symbol}>
+                <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
                   {t.symbol}
                 </option>
               ))}
@@ -287,7 +292,8 @@ export function Swap() {
               <button
                 key={p}
                 onClick={() => setPercentage(p)}
-                className="flex-1 rounded-lg bg-white/5 py-1.5 text-xs transition hover:bg-white/10"
+                disabled={!isConnected}
+                className="flex-1 rounded-lg bg-white/5 py-1.5 text-xs transition hover:bg-white/10 disabled:opacity-40"
               >
                 {p === 100 ? 'Max' : `${p}%`}
               </button>
@@ -320,10 +326,10 @@ export function Swap() {
                 const t = TOKENS.find((x) => x.symbol === e.target.value)
                 if (t) setBuyToken(t)
               }}
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm outline-none"
+              className={SELECT_CLASS}
             >
               {TOKENS.map((t) => (
-                <option key={t.symbol} value={t.symbol}>
+                <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
                   {t.symbol}
                 </option>
               ))}
@@ -362,14 +368,17 @@ export function Swap() {
 
         <button
           onClick={handleSwap}
-          disabled={!quote?.transaction || loading || isPending || isConfirming}
+          disabled={
+            !isConnected ||
+            !isBase ||
+            !quote?.transaction ||
+            loading ||
+            isPending ||
+            isConfirming
+          }
           className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
-          {isPending || isConfirming
-            ? 'Confirming...'
-            : loading
-            ? 'Finding best price...'
-            : 'Swap'}
+          {buttonLabel}
         </button>
       </div>
 
@@ -407,7 +416,9 @@ export function Swap() {
                 >
                   {currentStep > step.id ? '✓' : step.id}
                 </div>
-                <span className={`text-sm ${currentStep >= step.id ? 'text-white' : 'text-gray-500'}`}>
+                <span
+                  className={`text-sm ${currentStep >= step.id ? 'text-white' : 'text-gray-500'}`}
+                >
                   {step.label}
                 </span>
               </div>
@@ -421,7 +432,7 @@ export function Swap() {
                 href={`https://basescan.org/tx/${txHash}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="break-all font-mono text-xs text-slate-400 transition hover:text-slate-200"
+                className="break-all font-mono text-xs text-blue-400/45 transition hover:text-blue-300/75"
               >
                 View on Basescan ↗
               </a>

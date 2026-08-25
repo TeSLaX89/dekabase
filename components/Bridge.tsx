@@ -21,9 +21,18 @@ const CHAINS = [
   { id: optimism.id, name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
   { id: polygon.id, name: 'Polygon', rpc: 'https://polygon-rpc.com' },
   { id: ink.id, name: 'Ink', rpc: 'https://rpc-gel.inkonchain.com' },
-]
+] as const
 
-const TOKENS: Record<number, { symbol: string; address: `0x${string}`; decimals: number; isNative?: boolean }[]> = {
+type SupportedChainId = (typeof CHAINS)[number]['id']
+
+type Token = {
+  symbol: string
+  address: `0x${string}`
+  decimals: number
+  isNative?: boolean
+}
+
+const TOKENS: Record<number, Token[]> = {
   [mainnet.id]: [
     { symbol: 'ETH', address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', decimals: 18, isNative: true },
     { symbol: 'USDC', address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', decimals: 6 },
@@ -51,21 +60,16 @@ const TOKENS: Record<number, { symbol: string; address: `0x${string}`; decimals:
   ],
   [ink.id]: [
     { symbol: 'ETH', address: '0x4200000000000000000000000000000000000006', decimals: 18, isNative: true },
-    { symbol: 'USDC', address: '0xF1815bd50389c4651A8CefF5B3F6c3C3C3C3C3C3', decimals: 6 },
-    { symbol: 'USDT', address: '0x0000000000000000000000000000000000000000', decimals: 6 },
   ],
 }
+
+const SELECT_CLASS =
+  'rounded-lg border border-white/10 bg-zinc-900 px-2 py-2 text-xs text-white outline-none'
 
 const getClient = (chainId: number) => {
   const chain = CHAINS.find((c) => c.id === chainId)
   if (!chain) return null
   return createPublicClient({
-    chain: {
-      id: chainId,
-      name: chain.name,
-      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-      rpcUrls: { default: { http: [chain.rpc] } },
-    },
     transport: http(chain.rpc),
   })
 }
@@ -73,12 +77,12 @@ const getClient = (chainId: number) => {
 export function Bridge() {
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
-  const { switchChain } = useSwitchChain()
+  const { switchChainAsync } = useSwitchChain()
 
-  const [fromChainId, setFromChainId] = useState(base.id)
-  const [toChainId, setToChainId] = useState(mainnet.id)
-  const [fromToken, setFromToken] = useState(TOKENS[base.id][0])
-  const [toToken, setToToken] = useState(TOKENS[mainnet.id][0])
+  const [fromChainId, setFromChainId] = useState<SupportedChainId>(base.id)
+  const [toChainId, setToChainId] = useState<SupportedChainId>(mainnet.id)
+  const [fromToken, setFromToken] = useState<Token>(TOKENS[base.id][0])
+  const [toToken, setToToken] = useState<Token>(TOKENS[mainnet.id][0])
   const [amount, setAmount] = useState('')
   const [quote, setQuote] = useState<any>(null)
   const [loading, setLoading] = useState(false)
@@ -87,8 +91,17 @@ export function Bridge() {
   const [balanceFormatted, setBalanceFormatted] = useState('0')
   const [scored, setScored] = useState(false)
 
-  const { sendTransaction, sendTransactionAsync, data: txHash, isPending, isError, reset } = useSendTransaction()
-  const { isLoading: isConfirming, isSuccess, isError: isReceiptError } = useWaitForTransactionReceipt({ hash: txHash })
+  const {
+    sendTransaction,
+    sendTransactionAsync,
+    data: txHash,
+    isPending,
+    isError,
+    reset,
+  } = useSendTransaction()
+
+  const { isLoading: isConfirming, isSuccess, isError: isReceiptError } =
+    useWaitForTransactionReceipt({ hash: txHash })
 
   useEffect(() => {
     if (isError || isReceiptError) {
@@ -155,8 +168,8 @@ export function Bridge() {
         : toToken.address
 
       const params = new URLSearchParams({
-        originChainId: fromChainId.toString(),
-        destinationChainId: toChainId.toString(),
+        originChainId: String(fromChainId),
+        destinationChainId: String(toChainId),
         inputToken: fromToken.address,
         outputToken: outputTokenAddress,
         amount: amountRaw,
@@ -189,11 +202,11 @@ export function Bridge() {
   }, [amount, fromChainId, toChainId, fromToken, toToken, address])
 
   const handleBridge = async () => {
-    if (!quote?.swapTx || !address) return
+    if (!isConnected || !quote?.swapTx || !address) return
 
     try {
       if (chainId !== fromChainId) {
-        await switchChain({ chainId: fromChainId })
+        await switchChainAsync({ chainId: fromChainId as any })
         return
       }
 
@@ -205,8 +218,8 @@ export function Bridge() {
         setStatus('approving')
         for (const approval of quote.approvalTxns) {
           const hash = await sendTransactionAsync({
-            to: approval.to,
-            data: approval.data,
+            to: approval.to as `0x${string}`,
+            data: approval.data as `0x${string}`,
             value: approval.value ? BigInt(approval.value) : undefined,
           })
           const client = getClient(fromChainId)
@@ -218,11 +231,13 @@ export function Bridge() {
 
       const value = fromToken.isNative
         ? parseUnits(amount, 18)
-        : (quote.swapTx.value ? BigInt(quote.swapTx.value) : undefined)
+        : quote.swapTx.value
+          ? BigInt(quote.swapTx.value)
+          : undefined
 
       sendTransaction({
-        to: quote.swapTx.to,
-        data: quote.swapTx.data,
+        to: quote.swapTx.to as `0x${string}`,
+        data: quote.swapTx.data as `0x${string}`,
         value,
       })
     } catch (err: any) {
@@ -263,7 +278,7 @@ export function Bridge() {
   }
 
   const setPercentage = (pct: number) => {
-    if (!balanceFormatted || Number(balanceFormatted) <= 0) return
+    if (!isConnected || !balanceFormatted || Number(balanceFormatted) <= 0) return
     const val = (Number(balanceFormatted) * pct).toFixed(fromToken.isNative ? 6 : fromToken.decimals)
     setAmount(val)
   }
@@ -280,21 +295,25 @@ export function Bridge() {
   const outputAmount = quote?.steps?.bridge?.outputAmount
     ? formatUnits(BigInt(quote.steps.bridge.outputAmount), toToken.decimals)
     : quote?.expectedOutputAmount
-    ? formatUnits(BigInt(quote.expectedOutputAmount), toToken.decimals)
-    : null
+      ? formatUnits(BigInt(quote.expectedOutputAmount), toToken.decimals)
+      : null
 
   const feeUsd = quote?.fees?.total?.amountUsd
   const feePct = quote?.fees?.total?.pct
     ? (Number(quote.fees.total.pct) / 1e16).toFixed(3)
     : null
 
-  if (!isConnected) {
-    return (
-      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/[0.03] p-10 text-center">
-        <p className="text-gray-400">Please connect your wallet</p>
-      </div>
-    )
-  }
+  const buttonLabel = !isConnected
+    ? 'Connect wallet'
+    : status === 'approving'
+      ? 'Approving...'
+      : status === 'bridging' || isPending || isConfirming
+        ? 'Bridging...'
+        : loading
+          ? 'Finding best route...'
+          : fromChainId === toChainId
+            ? 'Select different chains'
+            : 'Bridge'
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
@@ -308,7 +327,10 @@ export function Bridge() {
           <div className="flex justify-between text-sm text-gray-400">
             <span>You send</span>
             <span>
-              Balance: {Number(balanceFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })}
+              Balance:{' '}
+              {isConnected
+                ? Number(balanceFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                : '—'}
             </span>
           </div>
 
@@ -323,11 +345,13 @@ export function Bridge() {
             <div className="flex gap-2">
               <select
                 value={fromChainId}
-                onChange={(e) => setFromChainId(Number(e.target.value))}
-                className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs outline-none"
+                onChange={(e) => setFromChainId(Number(e.target.value) as SupportedChainId)}
+                className={SELECT_CLASS}
               >
                 {CHAINS.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
+                    {c.name}
+                  </option>
                 ))}
               </select>
               <select
@@ -336,10 +360,12 @@ export function Bridge() {
                   const t = TOKENS[fromChainId]?.find((x) => x.symbol === e.target.value)
                   if (t) setFromToken(t)
                 }}
-                className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs outline-none"
+                className={SELECT_CLASS}
               >
                 {(TOKENS[fromChainId] || []).map((t) => (
-                  <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
+                  <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
+                    {t.symbol}
+                  </option>
                 ))}
               </select>
             </div>
@@ -350,7 +376,8 @@ export function Bridge() {
               <button
                 key={p}
                 onClick={() => setPercentage(p)}
-                className="rounded-lg bg-white/5 px-2.5 py-1 text-xs transition hover:bg-white/10"
+                disabled={!isConnected}
+                className="rounded-lg bg-white/5 px-2.5 py-1 text-xs transition hover:bg-white/10 disabled:opacity-40"
               >
                 {p === 1 ? 'Max' : `${p * 100}%`}
               </button>
@@ -378,11 +405,13 @@ export function Bridge() {
             <div className="flex gap-2">
               <select
                 value={toChainId}
-                onChange={(e) => setToChainId(Number(e.target.value))}
-                className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs outline-none"
+                onChange={(e) => setToChainId(Number(e.target.value) as SupportedChainId)}
+                className={SELECT_CLASS}
               >
                 {CHAINS.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
+                    {c.name}
+                  </option>
                 ))}
               </select>
               <select
@@ -391,10 +420,12 @@ export function Bridge() {
                   const t = TOKENS[toChainId]?.find((x) => x.symbol === e.target.value)
                   if (t) setToToken(t)
                 }}
-                className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-xs outline-none"
+                className={SELECT_CLASS}
               >
                 {(TOKENS[toChainId] || []).map((t) => (
-                  <option key={t.symbol} value={t.symbol}>{t.symbol}</option>
+                  <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
+                    {t.symbol}
+                  </option>
                 ))}
               </select>
             </div>
@@ -410,7 +441,9 @@ export function Bridge() {
             {feeUsd && (
               <div className="flex justify-between">
                 <span>Fee</span>
-                <span>${Number(feeUsd).toFixed(4)} {feePct ? `(${feePct}%)` : ''}</span>
+                <span>
+                  ${Number(feeUsd).toFixed(4)} {feePct ? `(${feePct}%)` : ''}
+                </span>
               </div>
             )}
             <div className="flex justify-between">
@@ -424,18 +457,17 @@ export function Bridge() {
 
         <button
           onClick={handleBridge}
-          disabled={!quote?.swapTx || loading || isPending || isConfirming || fromChainId === toChainId}
+          disabled={
+            !isConnected ||
+            !quote?.swapTx ||
+            loading ||
+            isPending ||
+            isConfirming ||
+            fromChainId === toChainId
+          }
           className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
-          {status === 'approving'
-            ? 'Approving...'
-            : status === 'bridging' || isPending || isConfirming
-            ? 'Bridging...'
-            : loading
-            ? 'Finding best route...'
-            : fromChainId === toChainId
-            ? 'Select different chains'
-            : 'Bridge'}
+          {buttonLabel}
         </button>
       </div>
 
@@ -454,7 +486,8 @@ export function Bridge() {
           <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
             <p className="text-xs text-gray-500">Route</p>
             <p className="font-medium text-white">
-              {CHAINS.find((c) => c.id === fromChainId)?.name} → {CHAINS.find((c) => c.id === toChainId)?.name}
+              {CHAINS.find((c) => c.id === fromChainId)?.name} →{' '}
+              {CHAINS.find((c) => c.id === toChainId)?.name}
             </p>
           </div>
 
