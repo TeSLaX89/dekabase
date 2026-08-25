@@ -5,6 +5,8 @@ import { base, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { useState, useEffect } from 'react'
 import { parseUnits, formatUnits, erc20Abi, createPublicClient, http } from 'viem'
 
+const NATIVE = '0x0000000000000000000000000000000000000000'
+
 const ink = {
   id: 57073,
   name: 'Ink',
@@ -54,7 +56,7 @@ const TOKENS: Record<number, Token[]> = {
     { symbol: 'USDT', address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
   ],
   [polygon.id]: [
-    { symbol: 'ETH', address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', decimals: 18, isNative: true },
+    { symbol: 'ETH', address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', decimals: 18 },
     { symbol: 'USDC', address: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', decimals: 6 },
     { symbol: 'USDT', address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', decimals: 6 },
   ],
@@ -163,15 +165,14 @@ export function Bridge() {
 
     try {
       const amountRaw = parseUnits(amount, fromToken.decimals).toString()
-      const outputTokenAddress = toToken.isNative
-        ? '0x0000000000000000000000000000000000000000'
-        : toToken.address
+      const inputToken = fromToken.isNative ? NATIVE : fromToken.address
+      const outputToken = toToken.isNative ? NATIVE : toToken.address
 
       const params = new URLSearchParams({
         originChainId: String(fromChainId),
         destinationChainId: String(toChainId),
-        inputToken: fromToken.address,
-        outputToken: outputTokenAddress,
+        inputToken,
+        outputToken,
         amount: amountRaw,
         depositor: address,
         tradeType: 'exactInput',
