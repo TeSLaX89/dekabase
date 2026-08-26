@@ -3,6 +3,7 @@ import { base, baseSepolia, mainnet, arbitrum, optimism, polygon } from 'wagmi/c
 import { injected, baseAccount } from 'wagmi/connectors'
 import { cookieStorage, createStorage } from 'wagmi'
 import { defineChain } from 'viem'
+import { Attribution } from 'ox/erc8021'
 
 const ink = defineChain({
   id: 57073,
@@ -14,6 +15,10 @@ const ink = defineChain({
   blockExplorers: {
     default: { name: 'Ink Explorer', url: 'https://explorer.inkonchain.com' },
   },
+})
+
+const DATA_SUFFIX = Attribution.toDataSuffix({
+  codes: ['bc_37flpbo4'],
 })
 
 export const config = createConfig({
@@ -37,4 +42,5 @@ export const config = createConfig({
     [polygon.id]: http('https://polygon-rpc.com'),
     [ink.id]: http('https://rpc-gel.inkonchain.com'),
   },
+  dataSuffix: DATA_SUFFIX,
 })
