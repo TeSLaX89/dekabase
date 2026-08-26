@@ -1,11 +1,17 @@
 'use client'
 
-import { useAccount, useChainId, useSwitchChain, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi'
+import {
+  useAccount,
+  useChainId,
+  useSwitchChain,
+  useSendTransaction,
+  useWaitForTransactionReceipt,
+} from 'wagmi'
 import { base, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { useState, useEffect } from 'react'
 import { parseUnits, formatUnits, erc20Abi, createPublicClient, http } from 'viem'
 
-const NATIVE = '0x0000000000000000000000000000000000000000'
+const NATIVE = '0x0000000000000000000000000000000000000000' as const
 
 const ink = {
   id: 57073,
@@ -68,8 +74,8 @@ const TOKENS: Record<number, Token[]> = {
 const SELECT_CLASS =
   'rounded-lg border border-white/10 bg-zinc-900 px-2 py-2 text-xs text-white outline-none'
 
-const getClient = (chainId: number) => {
-  const chain = CHAINS.find((c) => c.id === chainId)
+const getClient = (id: number) => {
+  const chain = CHAINS.find((c) => c.id === id)
   if (!chain) return null
   return createPublicClient({
     transport: http(chain.rpc),
@@ -79,7 +85,7 @@ const getClient = (chainId: number) => {
 export function Bridge() {
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
-  const { switchChainAsync } = useSwitchChain()
+  const { switchChainAsync, isPending: isSwitching } = useSwitchChain()
 
   const [fromChainId, setFromChainId] = useState<SupportedChainId>(base.id)
   const [toChainId, setToChainId] = useState<SupportedChainId>(mainnet.id)
@@ -104,6 +110,9 @@ export function Bridge() {
 
   const { isLoading: isConfirming, isSuccess, isError: isReceiptError } =
     useWaitForTransactionReceipt({ hash: txHash })
+
+  const fromChainName = CHAINS.find((c) => c.id === fromChainId)?.name ?? 'network'
+  const wrongNetwork = isConnected && chainId !== fromChainId
 
   useEffect(() => {
     if (isError || isReceiptError) {
@@ -203,16 +212,23 @@ export function Bridge() {
   }, [amount, fromChainId, toChainId, fromToken, toToken, address])
 
   const handleBridge = async () => {
-    if (!isConnected || !quote?.swapTx || !address) return
+    if (!isConnected || !address) return
 
     try {
+      setError('')
+
       if (chainId !== fromChainId) {
-        await switchChainAsync({ chainId: fromChainId as any })
+        try {
+          await switchChainAsync({ chainId: fromChainId })
+        } catch (err: any) {
+          setError(err?.shortMessage || err?.message || `Failed to switch to ${fromChainName}`)
+        }
         return
       }
 
+      if (!quote?.swapTx) return
+
       reset()
-      setError('')
       setScored(false)
 
       if (!fromToken.isNative && quote.approvalTxns?.length > 0) {
@@ -275,12 +291,46 @@ export function Bridge() {
     setToToken(fromToken)
     setAmount('')
     setQuote(null)
+    setError('')
     setStatus('idle')
   }
 
-  const setPercentage = (pct: number) => {
-    if (!isConnected || !balanceFormatted || Number(balanceFormatted) <= 0) return
-    const val = (Number(balanceFormatted) * pct).toFixed(fromToken.isNative ? 6 : fromToken.decimals)
+  const setPercentage = async (pct: number) => {
+    if (!isConnected || !address || !balanceFormatted || Number(balanceFormatted) <= 0) return
+
+    const bal = Number(balanceFormatted)
+
+    if (pct >= 1 && fromToken.isNative) {
+      try {
+        const client = getClient(fromChainId)
+        if (!client) throw new Error('No RPC')
+
+        const balWei = parseUnits(balanceFormatted, 18)
+        const gasPrice = await client.getGasPrice()
+
+        const gasLimit = BigInt(400000)
+        const gasCostWei = (gasPrice * gasLimit * BigInt(130)) / BigInt(100)
+
+        if (balWei <= gasCostWei) {
+          setAmount('0')
+          setError('Balance too low to cover gas')
+          return
+        }
+
+        const maxWei = balWei - gasCostWei
+        const full = formatUnits(maxWei, 18)
+        const [whole, frac = ''] = full.split('.')
+        setAmount(frac ? `${whole}.${frac.slice(0, 6)}` : whole)
+      } catch {
+        const buffer =
+          fromChainId === mainnet.id ? 0.002 : fromChainId === polygon.id ? 0.05 : 0.00005
+        const max = Math.max(0, bal - buffer)
+        setAmount(max.toFixed(6))
+      }
+      return
+    }
+
+    const val = (bal * pct).toFixed(fromToken.isNative ? 6 : fromToken.decimals)
     setAmount(val)
   }
 
@@ -306,15 +356,28 @@ export function Bridge() {
 
   const buttonLabel = !isConnected
     ? 'Connect wallet'
-    : status === 'approving'
-      ? 'Approving...'
-      : status === 'bridging' || isPending || isConfirming
-        ? 'Bridging...'
-        : loading
-          ? 'Finding best route...'
-          : fromChainId === toChainId
-            ? 'Select different chains'
-            : 'Bridge'
+    : isSwitching
+      ? `Switching to ${fromChainName}...`
+      : wrongNetwork
+        ? `Switch to ${fromChainName}`
+        : status === 'approving'
+          ? 'Approving...'
+          : status === 'bridging' || isPending || isConfirming
+            ? 'Bridging...'
+            : loading
+              ? 'Finding best route...'
+              : fromChainId === toChainId
+                ? 'Select different chains'
+                : 'Bridge'
+
+  const buttonDisabled =
+    !isConnected ||
+    isSwitching ||
+    loading ||
+    isPending ||
+    isConfirming ||
+    fromChainId === toChainId ||
+    (!wrongNetwork && !quote?.swapTx)
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
@@ -458,14 +521,7 @@ export function Bridge() {
 
         <button
           onClick={handleBridge}
-          disabled={
-            !isConnected ||
-            !quote?.swapTx ||
-            loading ||
-            isPending ||
-            isConfirming ||
-            fromChainId === toChainId
-          }
+          disabled={buttonDisabled}
           className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
           {buttonLabel}

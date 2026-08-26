@@ -1,15 +1,24 @@
 'use client'
 
-import { useAccount, useChainId, useSendTransaction, useWaitForTransactionReceipt, usePublicClient } from 'wagmi'
+import {
+  useAccount,
+  useChainId,
+  useSendTransaction,
+  useWaitForTransactionReceipt,
+  usePublicClient,
+  useWriteContract,
+  useSwitchChain,
+} from 'wagmi'
 import { base } from 'wagmi/chains'
 import { useState, useEffect, useRef } from 'react'
 import { parseUnits, formatUnits, erc20Abi } from 'viem'
 
 const FEE_RECIPIENT = '0xA4200F9F5818cbA01B8dF0e57038A5646ad46AF0'
 const FEE_BPS = 25
+const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
 const TOKENS = [
-  { symbol: 'ETH', address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18 },
+  { symbol: 'ETH', address: NATIVE, decimals: 18 },
   { symbol: 'USDC', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
   { symbol: 'USDT', address: '0xfde4C96c8593536E31F7872A280281e9B3F2d39e', decimals: 6 },
   { symbol: 'WETH', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
@@ -22,6 +31,7 @@ export function Swap() {
   const { address, isConnected } = useAccount()
   const chainId = useChainId()
   const publicClient = usePublicClient({ chainId: base.id })
+  const { switchChainAsync, isPending: isSwitching } = useSwitchChain()
 
   const [sellToken, setSellToken] = useState(TOKENS[0])
   const [buyToken, setBuyToken] = useState(TOKENS[1])
@@ -33,12 +43,15 @@ export function Swap() {
   const [showSettings, setShowSettings] = useState(false)
   const [sellBalanceRaw, setSellBalanceRaw] = useState<bigint>(BigInt(0))
   const [sellBalanceFormatted, setSellBalanceFormatted] = useState('0')
+  const [status, setStatus] = useState<'idle' | 'approving' | 'swapping'>('idle')
   const scoredRef = useRef<string | null>(null)
 
-  const { sendTransaction, data: txHash, isPending } = useSendTransaction()
+  const { sendTransaction, data: txHash, isPending, reset } = useSendTransaction()
+  const { writeContractAsync } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
   const isBase = chainId === base.id
+  const isNativeSell = sellToken.address.toLowerCase() === NATIVE.toLowerCase()
 
   useEffect(() => {
     const loadBalance = async () => {
@@ -49,7 +62,7 @@ export function Swap() {
       }
 
       try {
-        if (sellToken.address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE') {
+        if (isNativeSell) {
           const bal = await publicClient.getBalance({ address })
           setSellBalanceRaw(bal)
           setSellBalanceFormatted(formatUnits(bal, 18))
@@ -70,7 +83,7 @@ export function Swap() {
     }
 
     loadBalance()
-  }, [address, sellToken, publicClient])
+  }, [address, sellToken, publicClient, isNativeSell])
 
   const setPercentage = (percent: number) => {
     if (!isConnected || sellBalanceRaw === BigInt(0)) return
@@ -82,45 +95,53 @@ export function Swap() {
     setSellAmount(formatUnits(raw, sellToken.decimals))
   }
 
+  const requestQuote = async () => {
+    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0) return null
+
+    const amount = parseUnits(sellAmount, sellToken.decimals).toString()
+
+    const params = new URLSearchParams({
+      chainId: '8453',
+      sellToken: sellToken.address,
+      buyToken: buyToken.address,
+      sellAmount: amount,
+      taker: address,
+      swapFeeRecipient: FEE_RECIPIENT,
+      swapFeeBps: FEE_BPS.toString(),
+      swapFeeToken: sellToken.address,
+      slippageBps: Math.floor(slippage * 100).toString(),
+    })
+
+    const res = await fetch(`/api/swap/quote?${params}`)
+    const data = await res.json()
+
+    if (
+      data.validationErrors ||
+      data.name === 'ERROR_CODE' ||
+      data.code ||
+      data.error ||
+      !data.buyAmount
+    ) {
+      throw new Error(
+        data.validationErrors?.[0]?.reason || data.message || data.error || 'Quote failed'
+      )
+    }
+
+    return data
+  }
+
   const fetchQuote = async () => {
-    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0) return
+    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0) {
+      setQuote(null)
+      return
+    }
 
     setLoading(true)
     setError('')
     setQuote(null)
 
     try {
-      const amount = parseUnits(sellAmount, sellToken.decimals).toString()
-
-      const params = new URLSearchParams({
-        chainId: '8453',
-        sellToken: sellToken.address,
-        buyToken: buyToken.address,
-        sellAmount: amount,
-        taker: address,
-        swapFeeRecipient: FEE_RECIPIENT,
-        swapFeeBps: FEE_BPS.toString(),
-        swapFeeToken: sellToken.address,
-        slippageBps: Math.floor(slippage * 100).toString(),
-      })
-
-      const res = await fetch(`/api/swap/quote?${params}`)
-      const data = await res.json()
-
-      if (
-        data.validationErrors ||
-        data.name === 'ERROR_CODE' ||
-        data.code ||
-        data.error ||
-        !data.buyAmount
-      ) {
-        setError(
-          data.validationErrors?.[0]?.reason || data.message || data.error || 'Quote failed'
-        )
-        setQuote(null)
-        return
-      }
-
+      const data = await requestQuote()
       setQuote(data)
     } catch (err: any) {
       setError(err.message || 'Failed to fetch quote')
@@ -132,19 +153,16 @@ export function Swap() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (sellAmount && Number(sellAmount) > 0) {
-        fetchQuote()
-      } else {
-        setQuote(null)
-      }
+      if (sellAmount && Number(sellAmount) > 0) fetchQuote()
+      else setQuote(null)
     }, 500)
-
     return () => clearTimeout(timer)
   }, [sellAmount, sellToken, buyToken, address, slippage, isBase])
 
   useEffect(() => {
     if (isSuccess && txHash && address && scoredRef.current !== txHash) {
       scoredRef.current = txHash
+      setStatus('idle')
       fetch('/api/leaderboard/add-site-score', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -158,14 +176,83 @@ export function Swap() {
     }
   }, [isSuccess, txHash, address])
 
-  const handleSwap = () => {
-    if (!isConnected || !isBase || !quote?.transaction) return
+  const getSpender = (q: any): `0x${string}` | null => {
+    const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || q?.transaction?.to
+    if (!spender || typeof spender !== 'string') return null
+    return spender as `0x${string}`
+  }
 
-    sendTransaction({
-      to: quote.transaction.to as `0x${string}`,
-      data: quote.transaction.data as `0x${string}`,
-      value: quote.transaction.value ? BigInt(quote.transaction.value) : undefined,
-    })
+  const needsApproval = (q: any) => {
+    if (isNativeSell || !q) return false
+    return q.issues?.allowance != null
+  }
+
+  const handleSwap = async () => {
+    if (!isConnected || !address) return
+
+    // Switch to Base only when user clicks the button
+    if (!isBase) {
+      try {
+        setError('')
+        await switchChainAsync({ chainId: base.id })
+      } catch (err: any) {
+        setError(err?.shortMessage || err?.message || 'Network switch failed')
+      }
+      return
+    }
+
+    if (!quote?.transaction || !publicClient) return
+
+    try {
+      reset()
+      setError('')
+
+      let activeQuote = quote
+
+      if (needsApproval(activeQuote)) {
+        const spender = getSpender(activeQuote)
+        if (!spender) {
+          setError('Missing allowance spender')
+          return
+        }
+
+        setStatus('approving')
+        const amountRaw = parseUnits(sellAmount, sellToken.decimals)
+
+        const approveHash = await writeContractAsync({
+          address: sellToken.address as `0x${string}`,
+          abi: erc20Abi,
+          functionName: 'approve',
+          args: [spender, amountRaw],
+          chainId: base.id,
+        })
+
+        await publicClient.waitForTransactionReceipt({ hash: approveHash })
+
+        const refreshed = await requestQuote()
+        if (!refreshed?.transaction) {
+          setError('Quote unavailable after approval')
+          setStatus('idle')
+          return
+        }
+        setQuote(refreshed)
+        activeQuote = refreshed
+      }
+
+      setStatus('swapping')
+
+      sendTransaction({
+        to: activeQuote.transaction.to as `0x${string}`,
+        data: activeQuote.transaction.data as `0x${string}`,
+        value: activeQuote.transaction.value
+          ? BigInt(activeQuote.transaction.value)
+          : undefined,
+        chainId: base.id,
+      })
+    } catch (err: any) {
+      setError(err.shortMessage || err.message || 'Swap failed')
+      setStatus('idle')
+    }
   }
 
   const switchTokens = () => {
@@ -173,12 +260,14 @@ export function Swap() {
     setBuyToken(sellToken)
     setSellAmount('')
     setQuote(null)
+    setError('')
+    setStatus('idle')
   }
 
   const getStepStatus = () => {
     if (isSuccess) return 3
-    if (isConfirming) return 2
-    if (isPending) return 1
+    if (status === 'swapping' || isConfirming) return 2
+    if (status === 'approving' || isPending) return 1
     return 0
   }
 
@@ -198,15 +287,23 @@ export function Swap() {
       ).toFixed(6)
     : null
 
+  const busy = loading || isPending || isConfirming || status === 'approving' || isSwitching
+
   const buttonLabel = !isConnected
     ? 'Connect wallet'
-    : !isBase
-      ? 'Switch to Base Mainnet'
-      : isPending || isConfirming
-        ? 'Confirming...'
-        : loading
-          ? 'Finding best price...'
-          : 'Swap'
+    : isSwitching
+      ? 'Switching network...'
+      : !isBase
+        ? 'Switch to Base Mainnet'
+        : status === 'approving'
+          ? 'Approving...'
+          : isPending || isConfirming || status === 'swapping'
+            ? 'Confirming...'
+            : loading
+              ? 'Finding best price...'
+              : needsApproval(quote)
+                ? `Approve ${sellToken.symbol}`
+                : 'Swap'
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
@@ -368,14 +465,7 @@ export function Swap() {
 
         <button
           onClick={handleSwap}
-          disabled={
-            !isConnected ||
-            !isBase ||
-            !quote?.transaction ||
-            loading ||
-            isPending ||
-            isConfirming
-          }
+          disabled={!isConnected || busy || (isBase && !quote?.transaction)}
           className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
           {buttonLabel}
@@ -402,7 +492,7 @@ export function Swap() {
           <div className="space-y-4 rounded-xl border border-white/10 bg-black/40 p-4">
             <p className="mb-2 text-xs text-gray-500">Transaction Progress</p>
             {[
-              { id: 1, label: 'Confirm in wallet' },
+              { id: 1, label: 'Approve / confirm in wallet' },
               { id: 2, label: 'Transaction pending' },
               { id: 3, label: 'Swap completed' },
             ].map((step) => (
