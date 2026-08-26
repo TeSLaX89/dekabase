@@ -114,7 +114,34 @@ export function Bridge() {
   const fromChainName = CHAINS.find((c) => c.id === fromChainId)?.name ?? 'network'
   const wrongNetwork = isConnected && chainId !== fromChainId
 
-  // clear stuck progress when amount / route changes
+  const refreshBalance = async () => {
+    if (!address) {
+      setBalanceFormatted('0')
+      return
+    }
+    const client = getClient(fromChainId)
+    if (!client) {
+      setBalanceFormatted('0')
+      return
+    }
+    try {
+      if (fromToken.isNative) {
+        const bal = await client.getBalance({ address })
+        setBalanceFormatted(formatUnits(bal, 18))
+      } else {
+        const bal = await client.readContract({
+          address: fromToken.address,
+          abi: erc20Abi,
+          functionName: 'balanceOf',
+          args: [address],
+        })
+        setBalanceFormatted(formatUnits(bal as bigint, fromToken.decimals))
+      }
+    } catch {
+      // keep previous
+    }
+  }
+
   useEffect(() => {
     setStatus('idle')
     setError('')
@@ -131,34 +158,7 @@ export function Bridge() {
   }, [isError, isReceiptError])
 
   useEffect(() => {
-    const loadBalance = async () => {
-      if (!address) {
-        setBalanceFormatted('0')
-        return
-      }
-      const client = getClient(fromChainId)
-      if (!client) {
-        setBalanceFormatted('0')
-        return
-      }
-      try {
-        if (fromToken.isNative) {
-          const bal = await client.getBalance({ address })
-          setBalanceFormatted(formatUnits(bal, 18))
-        } else {
-          const bal = await client.readContract({
-            address: fromToken.address,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [address],
-          })
-          setBalanceFormatted(formatUnits(bal as bigint, fromToken.decimals))
-        }
-      } catch {
-        setBalanceFormatted('0')
-      }
-    }
-    loadBalance()
+    refreshBalance()
   }, [address, fromToken, fromChainId])
 
   useEffect(() => {
@@ -273,7 +273,6 @@ export function Bridge() {
     }
   }
 
-  // score once, then free UI for next bridge
   useEffect(() => {
     if (!isSuccess || !txHash || !address || scored) return
 
@@ -295,8 +294,16 @@ export function Bridge() {
     }).finally(() => {
       reset()
       setStatus('idle')
+      setAmount('')
+      setQuote(null)
+
+      // RPC may lag; refresh now + once more shortly after
+      refreshBalance()
+      setTimeout(() => {
+        refreshBalance()
+      }, 2500)
     })
-  }, [isSuccess, txHash, address, scored, fromChainId, toChainId])
+  }, [isSuccess, txHash, address, scored, fromChainId, toChainId, fromToken])
 
   const switchDirection = () => {
     setFromChainId(toChainId)
