@@ -114,10 +114,19 @@ export function Bridge() {
   const fromChainName = CHAINS.find((c) => c.id === fromChainId)?.name ?? 'network'
   const wrongNetwork = isConnected && chainId !== fromChainId
 
+  // clear stuck progress when amount / route changes
+  useEffect(() => {
+    setStatus('idle')
+    setError('')
+    setScored(false)
+    reset()
+  }, [amount, fromChainId, toChainId, fromToken, toToken])
+
   useEffect(() => {
     if (isError || isReceiptError) {
       setStatus('idle')
       setError('Transaction cancelled or failed')
+      reset()
     }
   }, [isError, isReceiptError])
 
@@ -260,28 +269,33 @@ export function Bridge() {
     } catch (err: any) {
       setError(err.shortMessage || err.message || 'Bridge failed')
       setStatus('idle')
+      reset()
     }
   }
 
+  // score once, then free UI for next bridge
   useEffect(() => {
-    if (isSuccess && txHash && address && !scored) {
-      setScored(true)
-      setStatus('success')
+    if (!isSuccess || !txHash || !address || scored) return
 
-      const fromName = CHAINS.find((c) => c.id === fromChainId)?.name.toLowerCase() || 'unknown'
-      const toName = CHAINS.find((c) => c.id === toChainId)?.name.toLowerCase() || 'unknown'
+    setScored(true)
+    setStatus('success')
 
-      fetch('/api/leaderboard/add-site-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address,
-          points: 8,
-          action: `bridge_${fromName}_${toName}`,
-          txHash,
-        }),
-      })
-    }
+    const fromName = CHAINS.find((c) => c.id === fromChainId)?.name.toLowerCase() || 'unknown'
+    const toName = CHAINS.find((c) => c.id === toChainId)?.name.toLowerCase() || 'unknown'
+
+    fetch('/api/leaderboard/add-site-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address,
+        points: 8,
+        action: `bridge_${fromName}_${toName}`,
+        txHash,
+      }),
+    }).finally(() => {
+      reset()
+      setStatus('idle')
+    })
   }, [isSuccess, txHash, address, scored, fromChainId, toChainId])
 
   const switchDirection = () => {
@@ -293,6 +307,8 @@ export function Bridge() {
     setQuote(null)
     setError('')
     setStatus('idle')
+    setScored(false)
+    reset()
   }
 
   const setPercentage = async (pct: number) => {
