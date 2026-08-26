@@ -7,6 +7,7 @@ export const metadata: Metadata = {
   description: 'Build, swap, bridge and grow on Base',
   icons: {
     icon: '/logo.png',
+    shortcut: '/logo.png',
     apple: '/logo.png',
   },
 }
