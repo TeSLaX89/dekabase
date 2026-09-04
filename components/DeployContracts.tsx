@@ -3,10 +3,29 @@
 import { useState, useEffect } from 'react'
 import { useWalletClient, useChainId, useSwitchChain, usePublicClient, useAccount } from 'wagmi'
 import { base } from 'wagmi/chains'
+import { parseEventLogs, encodeFunctionData, concat } from 'viem'
 import { supabase } from '@/lib/supabase'
+import { DATA_SUFFIX } from '@/config/wagmi'
 
-const SIMPLE_CONTRACT_BYTECODE =
-  '0x6080604052348015600e575f5ffd5b50603e80601c5f395ff3fe60806040525f80fdfea2646970667358221220a5c3e8e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e064736f6c63430008140033'
+const FACTORY_ADDRESS = '0xb59a9B6A05c4846edC57e6A59927AC396F2CE30F' as const
+
+const factoryAbi = [
+  {
+    type: 'function',
+    name: 'create',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [{ name: 'deployed', type: 'address' }],
+  },
+  {
+    type: 'event',
+    name: 'Created',
+    inputs: [
+      { name: 'user', type: 'address', indexed: true },
+      { name: 'deployed', type: 'address', indexed: true },
+    ],
+  },
+] as const
 
 type DeployLog = {
   tx_hash: string
@@ -47,7 +66,7 @@ export function DeployContracts() {
   }, [address])
 
   const handleDeploy = async () => {
-    if (!walletClient || !publicClient) {
+    if (!walletClient || !publicClient || !address) {
       setStatus('error')
       setErrorMessage('Please connect your wallet')
       return
@@ -65,35 +84,76 @@ export function DeployContracts() {
     setErrorMessage('')
 
     try {
-      const hash = await walletClient.deployContract({
-        abi: [],
-        bytecode: SIMPLE_CONTRACT_BYTECODE as `0x${string}`,
-        args: [],
+      await publicClient.simulateContract({
+        address: FACTORY_ADDRESS,
+        abi: factoryAbi,
+        functionName: 'create',
+        account: address,
+        chain: base,
+      })
+
+      const callData = encodeFunctionData({
+        abi: factoryAbi,
+        functionName: 'create',
+      })
+
+      const hash = await walletClient.sendTransaction({
+        to: FACTORY_ADDRESS,
+        data: concat([callData, DATA_SUFFIX]),
+        gas: BigInt(300000),
+        chain: base,
       })
 
       setTxHash(hash)
 
       const receipt = await publicClient.waitForTransactionReceipt({ hash })
 
-      if (receipt.contractAddress) {
-        setDeployed(receipt.contractAddress)
-        setStatus('success')
+      if (receipt.status !== 'success') {
+        setStatus('error')
+        setErrorMessage('Deployment transaction failed')
+        return
+      }
 
-        if (address) {
-          await fetch('/api/leaderboard/add-site-score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              address,
-              points: 12,
-              action: 'deploy',
-              txHash: hash,
-            }),
-          })
+      const parsed = parseEventLogs({
+        abi: factoryAbi,
+        logs: receipt.logs,
+        eventName: 'Created',
+      })
 
-          await loadHistory()
+      let created = parsed[0]?.args?.deployed as `0x${string}` | undefined
+
+      if (!created) {
+        const factoryLog = receipt.logs.find(
+          (log) =>
+            log.address.toLowerCase() === FACTORY_ADDRESS.toLowerCase() &&
+            log.topics.length >= 3
+        )
+        if (factoryLog?.topics[2]) {
+          created = `0x${factoryLog.topics[2].slice(-40)}` as `0x${string}`
         }
       }
+
+      if (!created) {
+        setStatus('error')
+        setErrorMessage('Deploy succeeded but contract address was not found')
+        return
+      }
+
+      setDeployed(created)
+      setStatus('success')
+
+      await fetch('/api/leaderboard/add-site-score', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address,
+          points: 12,
+          action: 'deploy',
+          txHash: hash,
+        }),
+      })
+
+      await loadHistory()
     } catch (error: any) {
       setStatus('error')
       setErrorMessage(error.shortMessage || error.message || 'Deployment failed')
