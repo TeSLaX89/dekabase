@@ -6,8 +6,8 @@
 
 html,
 body {
-  background: #050505;
-  color: #ffffff;
+  background: #0a1018;
+  color: #e6e4df;
   min-height: 100%;
 }
 
@@ -23,7 +23,7 @@ body {
 }
 
 ::selection {
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(196, 176, 138, 0.28);
   color: #fff;
 }
 

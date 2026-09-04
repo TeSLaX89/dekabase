@@ -29,24 +29,24 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>('gm')
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(34,211,238,0.06),_transparent_55%)]" />
+    <main className="min-h-screen bg-[#0a1018] text-[#e6e4df]">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(40,62,92,0.36),_transparent_64%)]" />
 
       <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-6 md:px-6 md:py-8">
         <header className="mb-10 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="flex h-12 w-12 md:h-14 md:w-14 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-black">
+            <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl border border-white/10 bg-[#070b10] md:h-14 md:w-14">
               <img
                 src="/logo.png"
                 alt="DekaBase"
-                className="h-9 w-9 md:h-11 md:w-11 object-contain"
+                className="h-9 w-9 object-contain md:h-11 md:w-11"
               />
             </div>
             <div>
               <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
                 DekaBase
               </h1>
-              <p className="text-[11px] text-gray-500 tracking-wide">
+              <p className="text-[11px] tracking-wide text-gray-500">
                 Built exclusively on Base
               </p>
             </div>
