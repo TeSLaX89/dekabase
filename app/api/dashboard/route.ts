@@ -3,6 +3,53 @@ import { isAddress } from 'viem'
 
 const ALCHEMY_KEY = process.env.ALCHEMY_API_KEY
 
+async function collectTransfers(
+  baseUrl: string,
+  address: string,
+  direction: 'fromAddress' | 'toAddress',
+  category: string[]
+) {
+  const transfers: any[] = []
+  let pageKey: string | undefined
+  let pages = 0
+
+  while (pages < 20) {
+    const params: Record<string, any> = {
+      fromBlock: '0x0',
+      toBlock: 'latest',
+      [direction]: address,
+      category,
+      excludeZeroValue: false,
+      order: 'asc',
+      maxCount: '0x3e8',
+      withMetadata: true,
+    }
+
+    if (pageKey) params.pageKey = pageKey
+
+    const res = await fetch(baseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'alchemy_getAssetTransfers',
+        params: [params],
+      }),
+    })
+
+    const data = await res.json()
+    const batch = data?.result?.transfers || []
+    transfers.push(...batch)
+
+    pageKey = data?.result?.pageKey
+    pages += 1
+    if (!pageKey || batch.length === 0) break
+  }
+
+  return transfers
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const address = searchParams.get('address')
@@ -33,7 +80,7 @@ export async function GET(req: NextRequest) {
   let interactedContracts = 0
 
   try {
-    const txRes = await fetch(baseUrl, {
+    const nonceRes = await fetch(baseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -43,10 +90,8 @@ export async function GET(req: NextRequest) {
         params: [address, 'latest'],
       }),
     })
-    const txData = await txRes.json()
-    if (txData?.result) {
-      txCount = parseInt(txData.result, 16) || 0
-    }
+    const nonceData = await nonceRes.json()
+    const nonce = nonceData?.result ? parseInt(nonceData.result, 16) || 0 : 0
 
     try {
       const tokenRes = await fetch(baseUrl, {
@@ -76,74 +121,57 @@ export async function GET(req: NextRequest) {
     } catch {}
 
     try {
-      const activityRes = await fetch(baseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'alchemy_getAssetTransfers',
-          params: [{
-            fromBlock: '0x0',
-            toBlock: 'latest',
-            fromAddress: address,
-            category: ['external', 'erc20', 'erc721', 'erc1155'],
-            order: 'desc',
-            maxCount: '0x64',
-            withMetadata: true,
-          }],
-        }),
-      })
-      const activityData = await activityRes.json()
-      const transfers = activityData?.result?.transfers || []
+      const [outgoing, incomingNative] = await Promise.all([
+        collectTransfers(baseUrl, address, 'fromAddress', [
+          'external',
+          'erc20',
+          'erc721',
+          'erc1155',
+        ]),
+        collectTransfers(baseUrl, address, 'toAddress', ['external']),
+      ])
 
-      if (transfers.length > 0) {
-        if (transfers[0]?.metadata?.blockTimestamp) {
-          lastTx = transfers[0].metadata.blockTimestamp
-        }
-
-        const daysSet = new Set(
-          transfers
-            .map((t: any) => t.metadata?.blockTimestamp?.slice(0, 10))
-            .filter(Boolean)
-        )
-        activeDays = daysSet.size
-
-        const contractsSet = new Set(
-          transfers
-            .map((t: any) => t.to)
-            .filter((to: any) => to && to.toLowerCase() !== address.toLowerCase())
-        )
-        interactedContracts = contractsSet.size
+      const sentByHash = new Map<string, any>()
+      for (const t of outgoing) {
+        if (t.hash && !sentByHash.has(t.hash)) sentByHash.set(t.hash, t)
       }
-    } catch {}
+      const sentTxs = Array.from(sentByHash.values())
 
-    try {
-      const firstRes = await fetch(baseUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'alchemy_getAssetTransfers',
-          params: [{
-            fromBlock: '0x0',
-            toBlock: 'latest',
-            fromAddress: address,
-            category: ['external', 'erc20', 'erc721', 'erc1155'],
-            order: 'asc',
-            maxCount: '0x1',
-            withMetadata: true,
-          }],
-        }),
-      })
-      const firstData = await firstRes.json()
-      const firstTransfers = firstData?.result?.transfers || []
+      const incomingHashes = new Set(
+        incomingNative.map((t: any) => t.hash).filter(Boolean)
+      )
 
-      if (firstTransfers.length > 0 && firstTransfers[0]?.metadata?.blockTimestamp) {
-        firstTx = firstTransfers[0].metadata.blockTimestamp
+      txCount = nonce + incomingHashes.size
+
+      const addr = address.toLowerCase()
+      const daysSet = new Set(
+        sentTxs
+          .map((t: any) => t.metadata?.blockTimestamp?.slice(0, 10))
+          .filter(Boolean)
+      )
+      activeDays = daysSet.size
+
+      const contractsSet = new Set(
+        sentTxs
+          .map((t: any) => t.to)
+          .filter((to: any) => to && to.toLowerCase() !== addr)
+      )
+      interactedContracts = contractsSet.size
+
+      const withTime = [...sentTxs, ...incomingNative]
+        .map((t: any) => t.metadata?.blockTimestamp)
+        .filter(Boolean)
+        .sort()
+
+      if (withTime.length > 0) {
+        firstTx = withTime[0]
+        lastTx = withTime[withTime.length - 1]
       }
-    } catch {}
+    } catch {
+      txCount = nonce
+    }
+
+    if (!txCount) txCount = nonce
 
     return NextResponse.json({
       txCount,

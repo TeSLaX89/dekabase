@@ -10,6 +10,7 @@ import {
 import { base, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { useState, useEffect } from 'react'
 import { parseUnits, formatUnits, erc20Abi, createPublicClient, http } from 'viem'
+import { DATA_SUFFIX } from '@/config/wagmi'
 
 const NATIVE = '0x0000000000000000000000000000000000000000' as const
 
@@ -247,6 +248,7 @@ export function Bridge() {
             to: approval.to as `0x${string}`,
             data: approval.data as `0x${string}`,
             value: approval.value ? BigInt(approval.value) : undefined,
+            dataSuffix: DATA_SUFFIX,
           })
           const client = getClient(fromChainId)
           if (client) await client.waitForTransactionReceipt({ hash })
@@ -265,6 +267,7 @@ export function Bridge() {
         to: quote.swapTx.to as `0x${string}`,
         data: quote.swapTx.data as `0x${string}`,
         value,
+        dataSuffix: DATA_SUFFIX,
       })
     } catch (err: any) {
       setError(err.shortMessage || err.message || 'Bridge failed')
@@ -297,7 +300,6 @@ export function Bridge() {
       setAmount('')
       setQuote(null)
 
-      // RPC may lag; refresh now + once more shortly after
       refreshBalance()
       setTimeout(() => {
         refreshBalance()

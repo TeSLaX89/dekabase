@@ -3,6 +3,7 @@
 import { useWriteContract, useWaitForTransactionReceipt, useChainId, useSwitchChain, useAccount } from 'wagmi'
 import { base } from 'wagmi/chains'
 import { GM_ADDRESS, gmAbi } from '@/config/gm'
+import { DATA_SUFFIX } from '@/config/wagmi'
 import { useEffect, useRef } from 'react'
 
 export function SayGMButton() {
@@ -50,6 +51,7 @@ export function SayGMButton() {
             abi: gmAbi,
             functionName: 'sayGM',
             chainId: base.id,
+            dataSuffix: DATA_SUFFIX,
           })
         }
         disabled={isPending || isConfirming}

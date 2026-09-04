@@ -12,6 +12,7 @@ import {
 import { base } from 'wagmi/chains'
 import { useState, useEffect, useRef } from 'react'
 import { parseUnits, formatUnits, erc20Abi } from 'viem'
+import { DATA_SUFFIX } from '@/config/wagmi'
 
 const FEE_RECIPIENT = '0xA4200F9F5818cbA01B8dF0e57038A5646ad46AF0'
 const FEE_BPS = 25
@@ -190,7 +191,6 @@ export function Swap() {
   const handleSwap = async () => {
     if (!isConnected || !address) return
 
-    // Switch to Base only when user clicks the button
     if (!isBase) {
       try {
         setError('')
@@ -225,6 +225,7 @@ export function Swap() {
           functionName: 'approve',
           args: [spender, amountRaw],
           chainId: base.id,
+          dataSuffix: DATA_SUFFIX,
         })
 
         await publicClient.waitForTransactionReceipt({ hash: approveHash })
@@ -248,6 +249,7 @@ export function Swap() {
           ? BigInt(activeQuote.transaction.value)
           : undefined,
         chainId: base.id,
+        dataSuffix: DATA_SUFFIX,
       })
     } catch (err: any) {
       setError(err.shortMessage || err.message || 'Swap failed')

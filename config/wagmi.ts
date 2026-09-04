@@ -17,7 +17,7 @@ const ink = defineChain({
   },
 })
 
-const DATA_SUFFIX = Attribution.toDataSuffix({
+export const DATA_SUFFIX = Attribution.toDataSuffix({
   codes: ['bc_37flpbo4'],
 })
 
