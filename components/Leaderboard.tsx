@@ -16,6 +16,8 @@ export function Leaderboard() {
   const [list, setList] = useState<Entry[]>([])
   const [myRank, setMyRank] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
 
   const calculateOnchainScore = (data: any) => {
     return (
@@ -51,7 +53,7 @@ export function Leaderboard() {
           .from('leaderboard_public')
           .select('short_address, onchain_score, site_score, score')
           .order('score', { ascending: false })
-          .limit(50)
+          .limit(100)
 
         if (error) {
           console.error(error)
@@ -78,6 +80,10 @@ export function Leaderboard() {
     loadLeaderboard()
   }, [address])
 
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [address])
+
   const getMedal = (index: number) => {
     if (index === 0) return '🥇'
     if (index === 1) return '🥈'
@@ -85,9 +91,20 @@ export function Leaderboard() {
     return `#${index + 1}`
   }
 
+  const totalPages = Math.max(1, Math.ceil(list.length / itemsPerPage))
+  const start = (currentPage - 1) * itemsPerPage
+  const currentList = list.slice(start, start + itemsPerPage)
+
   return (
     <div className="w-full max-w-2xl space-y-5 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-      <h2 className="text-center text-xl font-semibold text-white">Leaderboard</h2>
+      <div className="text-center">
+        <h2 className="text-xl font-semibold text-white">Leaderboard</h2>
+        {!loading && list.length > 0 && (
+          <p className="mt-1 text-xs text-gray-500">
+            {start + 1}–{Math.min(start + itemsPerPage, list.length)} of {list.length}
+          </p>
+        )}
+      </div>
 
       {loading ? (
         <p className="text-center text-sm text-gray-400">Loading...</p>
@@ -97,15 +114,18 @@ export function Leaderboard() {
             <p className="py-6 text-center text-sm text-gray-500">No data yet</p>
           )}
 
-          <div className="mb-1 grid grid-cols-[48px_1.4fr_0.8fr_0.7fr_0.7fr] gap-2 px-4 text-xs text-gray-500">
-            <span>Rank</span>
-            <span>Address</span>
-            <span className="text-center">Onchain</span>
-            <span className="text-center">Site</span>
-            <span className="text-center">Total</span>
-          </div>
+          {list.length > 0 && (
+            <div className="mb-1 grid grid-cols-[48px_1.4fr_0.8fr_0.7fr_0.7fr] gap-2 px-4 text-xs text-gray-500">
+              <span>Rank</span>
+              <span>Address</span>
+              <span className="text-center">Onchain</span>
+              <span className="text-center">Site</span>
+              <span className="text-center">Total</span>
+            </div>
+          )}
 
-          {list.map((entry, index) => {
+          {currentList.map((entry, index) => {
+            const globalIndex = start + index
             const isMe =
               address &&
               entry.short_address.toLowerCase() ===
@@ -113,16 +133,14 @@ export function Leaderboard() {
 
             return (
               <div
-                key={entry.short_address + index}
+                key={entry.short_address + globalIndex}
                 className={`grid grid-cols-[48px_1.4fr_0.8fr_0.7fr_0.7fr] items-center gap-2 rounded-xl border px-4 py-3 transition ${
                   isMe
                     ? 'border-white/20 bg-white/10'
                     : 'border-white/5 bg-black/40 hover:border-white/10'
                 }`}
               >
-                <span className="text-sm font-medium">
-                  {getMedal(index)}
-                </span>
+                <span className="text-sm font-medium">{getMedal(globalIndex)}</span>
                 <span
                   className={`truncate font-mono text-sm ${
                     isMe ? 'text-white' : 'text-gray-300'
@@ -146,8 +164,30 @@ export function Leaderboard() {
         </div>
       )}
 
+      {!loading && list.length > itemsPerPage && (
+        <div className="flex items-center justify-center gap-2 pt-1">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs text-gray-300 transition hover:bg-white/5 disabled:opacity-30"
+          >
+            Prev
+          </button>
+          <span className="min-w-[64px] text-center text-xs text-gray-500">
+            {currentPage} / {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-1.5 text-xs text-gray-300 transition hover:bg-white/5 disabled:opacity-30"
+          >
+            Next
+          </button>
+        </div>
+      )}
+
       {isConnected && myRank && (
-        <div className="pt-2 text-center text-sm text-gray-400">
+        <div className="pt-1 text-center text-sm text-gray-400">
           Your rank: <span className="font-semibold text-white">#{myRank}</span>
         </div>
       )}
