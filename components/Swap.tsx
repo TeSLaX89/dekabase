@@ -6,12 +6,11 @@ import {
   useSendTransaction,
   useWaitForTransactionReceipt,
   usePublicClient,
-  useWriteContract,
   useSwitchChain,
 } from 'wagmi'
 import { base } from 'wagmi/chains'
 import { useState, useEffect, useRef } from 'react'
-import { parseUnits, formatUnits, erc20Abi } from 'viem'
+import { parseUnits, formatUnits, erc20Abi, encodeFunctionData } from 'viem'
 import { DATA_SUFFIX } from '@/config/wagmi'
 
 const FEE_RECIPIENT = '0xA4200F9F5818cbA01B8dF0e57038A5646ad46AF0'
@@ -47,8 +46,8 @@ export function Swap() {
   const [status, setStatus] = useState<'idle' | 'approving' | 'swapping'>('idle')
   const scoredRef = useRef<string | null>(null)
 
-  const { sendTransaction, data: txHash, isPending, reset } = useSendTransaction()
-  const { writeContractAsync } = useWriteContract()
+  const { sendTransaction, sendTransactionAsync, data: txHash, isPending, reset } =
+    useSendTransaction()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
   const isBase = chainId === base.id
@@ -219,13 +218,14 @@ export function Swap() {
         setStatus('approving')
         const amountRaw = parseUnits(sellAmount, sellToken.decimals)
 
-        const approveHash = await writeContractAsync({
-          address: sellToken.address as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'approve',
-          args: [spender, amountRaw],
+        const approveHash = await sendTransactionAsync({
+          to: sellToken.address as `0x${string}`,
+          data: encodeFunctionData({
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [spender, amountRaw],
+          }),
           chainId: base.id,
-          dataSuffix: DATA_SUFFIX,
         })
 
         await publicClient.waitForTransactionReceipt({ hash: approveHash })
