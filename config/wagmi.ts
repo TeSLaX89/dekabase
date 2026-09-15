@@ -2,7 +2,7 @@ import { http, createConfig } from 'wagmi'
 import { base, baseSepolia, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { injected, baseAccount } from 'wagmi/connectors'
 import { cookieStorage, createStorage } from 'wagmi'
-import { defineChain } from 'viem'
+import { defineChain, type EIP1193Provider } from 'viem'
 import { Attribution } from 'ox/erc8021'
 
 const ink = defineChain({
@@ -34,10 +34,12 @@ export const config = createConfig({
     injected({
       target() {
         if (typeof window === 'undefined') return undefined
+        const provider = (window as Window & { okxwallet?: EIP1193Provider }).okxwallet
+        if (!provider) return undefined
         return {
           id: 'okx',
           name: 'OKX Wallet',
-          provider: (window as Window & { okxwallet?: unknown }).okxwallet,
+          provider,
         }
       },
     }),
