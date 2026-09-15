@@ -2,13 +2,19 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import type { Connector } from 'wagmi'
 
 export function ConnectWallet() {
+  const [ready, setReady] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const { address, isConnected, isConnecting } = useAccount()
   const { connect, connectors } = useConnect()
   const { disconnect } = useDisconnect()
   const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setReady(true)
+  }, [])
 
   useEffect(() => {
     const onClickOutside = (e: MouseEvent) => {
@@ -20,33 +26,43 @@ export function ConnectWallet() {
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [isOpen])
 
-  const getDisplayName = (name: string) => {
-    if (name === 'Injected') return 'MetaMask'
-    if (name.toLowerCase().includes('coinbase')) return 'Coinbase Wallet'
-    if (name.toLowerCase().includes('rabby')) return 'Rabby Wallet'
-    if (name.toLowerCase().includes('phantom')) return 'Phantom'
-    if (name.toLowerCase().includes('okx')) return 'OKX Wallet'
-    return name
+  const getDisplayName = (connector: Connector) => {
+    const id = connector.id.toLowerCase()
+    const n = connector.name.toLowerCase()
+    if (id === 'baseaccount' || n.includes('base account')) return 'Base Account'
+    if (id.includes('rabby') || n.includes('rabby')) return 'Rabby Wallet'
+    if (id === 'okx' || n.includes('okx')) return 'OKX Wallet'
+    if (id === 'metamask' || n.includes('metamask') || n === 'injected') return 'MetaMask'
+    return connector.name
   }
 
-  const preferred = connectors.filter((c) => {
-    const n = c.name.toLowerCase()
+  const allowed = connectors.filter((connector) => {
+    const label = getDisplayName(connector)
     return (
-      n.includes('coinbase') ||
-      n === 'injected' ||
-      n.includes('rabby') ||
-      n.includes('phantom') ||
-      n.includes('okx')
+      label === 'MetaMask' ||
+      label === 'Rabby Wallet' ||
+      label === 'Base Account' ||
+      label === 'OKX Wallet'
     )
   })
 
-  const sorted = preferred.sort((a, b) => {
-    if (a.name.toLowerCase().includes('coinbase')) return -1
-    if (b.name.toLowerCase().includes('coinbase')) return 1
-    if (a.name === 'Injected') return -1
-    if (b.name === 'Injected') return 1
-    return 0
+  const unique = allowed.filter((connector, index, all) => {
+    const label = getDisplayName(connector)
+    return all.findIndex((c) => getDisplayName(c) === label) === index
   })
+
+  const sorted = unique.sort((a, b) => {
+    const order = ['MetaMask', 'Rabby Wallet', 'Base Account', 'OKX Wallet']
+    return order.indexOf(getDisplayName(a)) - order.indexOf(getDisplayName(b))
+  })
+
+  if (!ready) {
+    return (
+      <button className="rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black">
+        Connect Wallet
+      </button>
+    )
+  }
 
   if (isConnected) {
     return (
@@ -87,7 +103,7 @@ export function ConnectWallet() {
               }}
               className="w-full border-b border-white/5 px-4 py-3 text-left text-sm text-gray-300 transition last:border-0 hover:bg-white/5 hover:text-white"
             >
-              {getDisplayName(connector.name)}
+              {getDisplayName(connector)}
             </button>
           ))}
         </div>

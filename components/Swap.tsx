@@ -13,19 +13,27 @@ import { useState, useEffect, useRef } from 'react'
 import { parseUnits, formatUnits, erc20Abi, encodeFunctionData } from 'viem'
 import { DATA_SUFFIX } from '@/config/wagmi'
 
-const FEE_RECIPIENT = '0xA4200F9F5818cbA01B8dF0e57038A5646ad46AF0'
-const FEE_BPS = 25
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+const USDT = '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2'
 
 const TOKENS = [
   { symbol: 'ETH', address: NATIVE, decimals: 18 },
   { symbol: 'USDC', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
-  { symbol: 'USDT', address: '0xfde4C96c8593536E31F7872A280281e9B3F2d39e', decimals: 6 },
+  { symbol: 'USDT', address: USDT, decimals: 6 },
   { symbol: 'WETH', address: '0x4200000000000000000000000000000000000006', decimals: 18 },
 ]
 
 const SELECT_CLASS =
   'rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-sm text-white outline-none'
+
+function parseSellAmount(value: string, decimals: number) {
+  try {
+    if (!value || Number(value) <= 0) return BigInt(0)
+    return parseUnits(value, decimals)
+  } catch {
+    return BigInt(0)
+  }
+}
 
 export function Swap() {
   const { address, isConnected } = useAccount()
@@ -52,6 +60,15 @@ export function Swap() {
 
   const isBase = chainId === base.id
   const isNativeSell = sellToken.address.toLowerCase() === NATIVE.toLowerCase()
+  const samePair =
+    sellToken.address.toLowerCase() === buyToken.address.toLowerCase() ||
+    sellToken.symbol === buyToken.symbol
+  const involvesUsdt =
+    sellToken.address.toLowerCase() === USDT.toLowerCase() ||
+    buyToken.address.toLowerCase() === USDT.toLowerCase()
+  const sellAmountRaw = parseSellAmount(sellAmount, sellToken.decimals)
+  const insufficient =
+    isConnected && sellAmountRaw > BigInt(0) && sellAmountRaw > sellBalanceRaw
 
   useEffect(() => {
     const loadBalance = async () => {
@@ -96,7 +113,9 @@ export function Swap() {
   }
 
   const requestQuote = async () => {
-    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0) return null
+    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0 || samePair || insufficient) {
+      return null
+    }
 
     const amount = parseUnits(sellAmount, sellToken.decimals).toString()
 
@@ -106,33 +125,34 @@ export function Swap() {
       buyToken: buyToken.address,
       sellAmount: amount,
       taker: address,
-      swapFeeRecipient: FEE_RECIPIENT,
-      swapFeeBps: FEE_BPS.toString(),
-      swapFeeToken: sellToken.address,
       slippageBps: Math.floor(slippage * 100).toString(),
     })
 
     const res = await fetch(`/api/swap/quote?${params}`)
     const data = await res.json()
 
-    if (
-      data.validationErrors ||
-      data.name === 'ERROR_CODE' ||
-      data.code ||
-      data.error ||
-      !data.buyAmount
-    ) {
+    if (!data?.buyAmount) {
       throw new Error(
-        data.validationErrors?.[0]?.reason || data.message || data.error || 'Quote failed'
+        data?.validationErrors?.[0]?.reason ||
+          data?.message ||
+          data?.error ||
+          data?.name ||
+          'Quote failed'
       )
+    }
+
+    if (data.liquidityAvailable === false) {
+      throw new Error('No liquidity for this pair')
     }
 
     return data
   }
 
   const fetchQuote = async () => {
-    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0) {
+    if (!sellAmount || !address || !isBase || Number(sellAmount) <= 0 || samePair || insufficient) {
       setQuote(null)
+      if (samePair) setError('Select two different tokens')
+      else if (insufficient) setError(`Insufficient ${sellToken.symbol} balance`)
       return
     }
 
@@ -154,10 +174,13 @@ export function Swap() {
   useEffect(() => {
     const timer = setTimeout(() => {
       if (sellAmount && Number(sellAmount) > 0) fetchQuote()
-      else setQuote(null)
+      else {
+        setQuote(null)
+        if (!samePair) setError('')
+      }
     }, 500)
     return () => clearTimeout(timer)
-  }, [sellAmount, sellToken, buyToken, address, slippage, isBase])
+  }, [sellAmount, sellToken, buyToken, address, slippage, isBase, insufficient])
 
   useEffect(() => {
     if (isSuccess && txHash && address && scoredRef.current !== txHash) {
@@ -197,6 +220,16 @@ export function Swap() {
       } catch (err: any) {
         setError(err?.shortMessage || err?.message || 'Network switch failed')
       }
+      return
+    }
+
+    if (samePair) {
+      setError('Select two different tokens')
+      return
+    }
+
+    if (insufficient) {
+      setError(`Insufficient ${sellToken.symbol} balance`)
       return
     }
 
@@ -297,15 +330,19 @@ export function Swap() {
       ? 'Switching network...'
       : !isBase
         ? 'Switch to Base Mainnet'
-        : status === 'approving'
-          ? 'Approving...'
-          : isPending || isConfirming || status === 'swapping'
-            ? 'Confirming...'
-            : loading
-              ? 'Finding best price...'
-              : needsApproval(quote)
-                ? `Approve ${sellToken.symbol}`
-                : 'Swap'
+        : samePair
+          ? 'Select different tokens'
+          : insufficient
+            ? `Insufficient ${sellToken.symbol}`
+            : status === 'approving'
+              ? 'Approving...'
+              : isPending || isConfirming || status === 'swapping'
+                ? 'Confirming...'
+                : loading
+                  ? 'Finding best price...'
+                  : needsApproval(quote)
+                    ? `Approve ${sellToken.symbol}`
+                    : 'Swap'
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
@@ -374,7 +411,12 @@ export function Swap() {
               value={sellToken.symbol}
               onChange={(e) => {
                 const t = TOKENS.find((x) => x.symbol === e.target.value)
-                if (t) setSellToken(t)
+                if (!t) return
+                setSellToken(t)
+                if (t.symbol === buyToken.symbol) {
+                  const other = TOKENS.find((x) => x.symbol !== t.symbol)
+                  if (other) setBuyToken(other)
+                }
               }}
               className={SELECT_CLASS}
             >
@@ -423,7 +465,12 @@ export function Swap() {
               value={buyToken.symbol}
               onChange={(e) => {
                 const t = TOKENS.find((x) => x.symbol === e.target.value)
-                if (t) setBuyToken(t)
+                if (!t) return
+                setBuyToken(t)
+                if (t.symbol === sellToken.symbol) {
+                  const other = TOKENS.find((x) => x.symbol !== t.symbol)
+                  if (other) setSellToken(other)
+                }
               }}
               className={SELECT_CLASS}
             >
@@ -436,7 +483,7 @@ export function Swap() {
           </div>
         </div>
 
-        {quote?.buyAmount && sellAmount && Number(sellAmount) > 0 && (
+        {quote?.buyAmount && sellAmount && Number(sellAmount) > 0 && !insufficient && (
           <div className="space-y-1.5 px-1 text-xs text-gray-400">
             <div className="flex justify-between">
               <span>Rate</span>
@@ -450,7 +497,7 @@ export function Swap() {
             </div>
             <div className="flex justify-between">
               <span>Platform Fee</span>
-              <span>0.25%</span>
+              <span>{involvesUsdt ? '0%' : '0.25%'}</span>
             </div>
             {minReceived && (
               <div className="flex justify-between">
@@ -467,7 +514,13 @@ export function Swap() {
 
         <button
           onClick={handleSwap}
-          disabled={!isConnected || busy || (isBase && !quote?.transaction)}
+          disabled={
+            !isConnected ||
+            busy ||
+            samePair ||
+            insufficient ||
+            (isBase && !quote?.transaction)
+          }
           className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
           {buttonLabel}

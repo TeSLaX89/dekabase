@@ -23,11 +23,24 @@ export const DATA_SUFFIX = Attribution.toDataSuffix({
 
 export const config = createConfig({
   chains: [base, baseSepolia, mainnet, arbitrum, optimism, polygon, ink],
+  multiInjectedProviderDiscovery: false,
   connectors: [
-    baseAccount(),
     injected({ target: 'metaMask' }),
     injected({ target: 'rabby' }),
-    injected(),
+    baseAccount({
+      appName: 'DekaBase',
+      appLogoUrl: 'https://dekabase.xyz/logo.png',
+    }),
+    injected({
+      target() {
+        if (typeof window === 'undefined') return undefined
+        return {
+          id: 'okx',
+          name: 'OKX Wallet',
+          provider: (window as Window & { okxwallet?: unknown }).okxwallet,
+        }
+      },
+    }),
   ],
   storage: createStorage({
     storage: cookieStorage,
