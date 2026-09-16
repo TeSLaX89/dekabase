@@ -9,7 +9,7 @@ import {
 } from 'wagmi'
 import { base, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { useState, useEffect } from 'react'
-import { parseUnits, formatUnits, erc20Abi, createPublicClient, http } from 'viem'
+import { parseUnits, formatUnits, erc20Abi, createPublicClient, http, encodeFunctionData } from 'viem'
 import { DATA_SUFFIX } from '@/config/wagmi'
 
 const NATIVE = '0x0000000000000000000000000000000000000000' as const
@@ -50,7 +50,7 @@ const TOKENS: Record<number, Token[]> = {
   [base.id]: [
     { symbol: 'ETH', address: '0x4200000000000000000000000000000000000006', decimals: 18, isNative: true },
     { symbol: 'USDC', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
-    { symbol: 'USDT', address: '0xfde4C96c8593536E31F7872A280281e9B3F2d39e', decimals: 6 },
+    { symbol: 'USDT', address: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2', decimals: 6 },
   ],
   [arbitrum.id]: [
     { symbol: 'ETH', address: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', decimals: 18, isNative: true },
@@ -139,7 +139,7 @@ export function Bridge() {
         setBalanceFormatted(formatUnits(bal as bigint, fromToken.decimals))
       }
     } catch {
-      // keep previous
+      setBalanceFormatted('0')
     }
   }
 
@@ -241,16 +241,36 @@ export function Bridge() {
       reset()
       setScored(false)
 
-      if (!fromToken.isNative && quote.approvalTxns?.length > 0) {
-        setStatus('approving')
-        for (const approval of quote.approvalTxns) {
+      if (!fromToken.isNative) {
+        const spender = (quote.allowanceTarget || quote.swapTx.to) as `0x${string}`
+        const amountRaw = parseUnits(amount, fromToken.decimals)
+        const client = getClient(fromChainId)
+
+        let allowed = BigInt(0)
+        if (client) {
+          try {
+            allowed = (await client.readContract({
+              address: fromToken.address,
+              abi: erc20Abi,
+              functionName: 'allowance',
+              args: [address, spender],
+            })) as bigint
+          } catch {
+            allowed = BigInt(0)
+          }
+        }
+
+        if (allowed < amountRaw) {
+          setStatus('approving')
           const hash = await sendTransactionAsync({
-            to: approval.to as `0x${string}`,
-            data: approval.data as `0x${string}`,
-            value: approval.value ? BigInt(approval.value) : undefined,
-            dataSuffix: DATA_SUFFIX,
+            to: fromToken.address,
+            data: encodeFunctionData({
+              abi: erc20Abi,
+              functionName: 'approve',
+              args: [spender, amountRaw],
+            }),
+            chainId: fromChainId,
           })
-          const client = getClient(fromChainId)
           if (client) await client.waitForTransactionReceipt({ hash })
         }
       }
