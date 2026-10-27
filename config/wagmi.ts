@@ -18,7 +18,7 @@ const ink = defineChain({
 })
 
 export const DATA_SUFFIX = Attribution.toDataSuffix({
-  codes: ['bc_37flpbo4'],
+  codes: ['bc_w1rrw1be'],
 })
 
 export const config = createConfig({
