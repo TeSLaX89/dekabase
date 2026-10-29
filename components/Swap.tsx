@@ -182,22 +182,23 @@ export function Swap() {
     return () => clearTimeout(timer)
   }, [sellAmount, sellToken, buyToken, address, slippage, isBase, insufficient])
 
-  useEffect(() => {
-    if (isSuccess && txHash && address && scoredRef.current !== txHash) {
-      scoredRef.current = txHash
-      setStatus('idle')
-      fetch('/api/leaderboard/add-site-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address,
-          points: 8,
-          action: 'swap',
-          txHash,
-        }),
-      })
-    }
-  }, [isSuccess, txHash, address])
+ useEffect(() => {
+  if (isSuccess && txHash && address && scoredRef.current !== txHash) {
+    scoredRef.current = txHash
+    setStatus('idle')
+    setSellToken((t) => ({ ...t }))
+    fetch('/api/leaderboard/add-site-score', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        address,
+        points: 8,
+        action: 'swap',
+        txHash,
+      }),
+    })
+  }
+}, [isSuccess, txHash, address])
 
   const getSpender = (q: any): `0x${string}` | null => {
     const spender = q?.issues?.allowance?.spender || q?.allowanceTarget || q?.transaction?.to
