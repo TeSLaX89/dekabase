@@ -9,7 +9,7 @@ import {
 } from 'wagmi'
 import { base, mainnet, arbitrum, optimism, polygon } from 'wagmi/chains'
 import { useState, useEffect } from 'react'
-import { parseUnits, formatUnits, erc20Abi, createPublicClient, http, encodeFunctionData } from 'viem'
+import { parseUnits, formatUnits, erc20Abi, createPublicClient, http, encodeFunctionData, concat } from 'viem'
 import { DATA_SUFFIX } from '@/config/wagmi'
 
 const NATIVE = '0x0000000000000000000000000000000000000000' as const
@@ -285,9 +285,11 @@ export function Bridge() {
 
       sendTransaction({
         to: quote.swapTx.to as `0x${string}`,
-        data: quote.swapTx.data as `0x${string}`,
+        data: concat([
+          quote.swapTx.data as `0x${string}`,
+          DATA_SUFFIX,
+        ]),
         value,
-        dataSuffix: DATA_SUFFIX,
       })
     } catch (err: any) {
       setError(err.shortMessage || err.message || 'Bridge failed')
@@ -407,236 +409,196 @@ export function Bridge() {
         ? `Switch to ${fromChainName}`
         : status === 'approving'
           ? 'Approving...'
-          : status === 'bridging' || isPending || isConfirming
-            ? 'Bridging...'
+          : isPending || isConfirming || status === 'bridging'
+            ? 'Confirming...'
             : loading
-              ? 'Finding best route...'
-              : fromChainId === toChainId
-                ? 'Select different chains'
+              ? 'Finding route...'
+              : !quote?.swapTx
+                ? 'Enter amount'
                 : 'Bridge'
-
-  const buttonDisabled =
-    !isConnected ||
-    isSwitching ||
-    loading ||
-    isPending ||
-    isConfirming ||
-    fromChainId === toChainId ||
-    (!wrongNetwork && !quote?.swapTx)
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6 lg:flex-row">
-      <div className="w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+      <div className="relative w-full max-w-md space-y-4 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold text-white">Bridge</h2>
-          <span className="text-xs text-gray-500">Powered by Across</span>
         </div>
 
         <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
           <div className="flex justify-between text-sm text-gray-400">
-            <span>You send</span>
+            <span>From</span>
             <span>
               Balance:{' '}
               {isConnected
-                ? Number(balanceFormatted).toLocaleString(undefined, { maximumFractionDigits: 6 })
+                ? Number(balanceFormatted).toLocaleString(undefined, {
+                    maximumFractionDigits: 6,
+                  })
                 : '—'}
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <input
-              type="number"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.0"
-              className="w-full bg-transparent text-2xl font-semibold outline-none"
-            />
-            <div className="flex gap-2">
-              <select
-                value={fromChainId}
-                onChange={(e) => setFromChainId(Number(e.target.value) as SupportedChainId)}
-                className={SELECT_CLASS}
-              >
-                {CHAINS.map((c) => (
-                  <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={fromToken.symbol}
-                onChange={(e) => {
-                  const t = TOKENS[fromChainId]?.find((x) => x.symbol === e.target.value)
-                  if (t) setFromToken(t)
-                }}
-                className={SELECT_CLASS}
-              >
-                {(TOKENS[fromChainId] || []).map((t) => (
-                  <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
-                    {t.symbol}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={fromChainId}
+              onChange={(e) => setFromChainId(Number(e.target.value) as SupportedChainId)}
+              className={SELECT_CLASS}
+            >
+              {CHAINS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={fromToken.symbol}
+              onChange={(e) => {
+                const t = TOKENS[fromChainId].find((tok) => tok.symbol === e.target.value)
+                if (t) setFromToken(t)
+              }}
+              className={SELECT_CLASS}
+            >
+              {TOKENS[fromChainId]?.map((t) => (
+                <option key={t.symbol} value={t.symbol}>
+                  {t.symbol}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div className="flex gap-2">
+          <input
+            type="number"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.0"
+            className="w-full bg-transparent text-2xl font-medium text-white outline-none placeholder:text-gray-600"
+          />
+
+          <div className="flex gap-2 pt-1">
             {[0.25, 0.5, 0.75, 1].map((p) => (
               <button
                 key={p}
                 onClick={() => setPercentage(p)}
-                disabled={!isConnected}
-                className="rounded-lg bg-white/5 px-2.5 py-1 text-xs transition hover:bg-white/10 disabled:opacity-40"
+                className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-gray-400 transition hover:bg-white/10 hover:text-white"
               >
-                {p === 1 ? 'Max' : `${p * 100}%`}
+                {p * 100}%
               </button>
             ))}
           </div>
         </div>
 
-        <div className="-my-1 flex justify-center">
+        <div className="flex justify-center">
           <button
             onClick={switchDirection}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 transition hover:bg-white/10"
+            className="rounded-full border border-white/10 bg-white/5 p-2 text-gray-400 transition hover:bg-white/10 hover:text-white"
           >
-            ⇅
+            ↓
           </button>
         </div>
 
         <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
           <div className="flex justify-between text-sm text-gray-400">
-            <span>You receive</span>
+            <span>To</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-full text-2xl font-semibold">
-              {outputAmount ? Number(outputAmount).toFixed(6) : '0.0'}
-            </div>
-            <div className="flex gap-2">
-              <select
-                value={toChainId}
-                onChange={(e) => setToChainId(Number(e.target.value) as SupportedChainId)}
-                className={SELECT_CLASS}
-              >
-                {CHAINS.map((c) => (
-                  <option key={c.id} value={c.id} className="bg-zinc-900 text-white">
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={toToken.symbol}
-                onChange={(e) => {
-                  const t = TOKENS[toChainId]?.find((x) => x.symbol === e.target.value)
-                  if (t) setToToken(t)
-                }}
-                className={SELECT_CLASS}
-              >
-                {(TOKENS[toChainId] || []).map((t) => (
-                  <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
-                    {t.symbol}
-                  </option>
-                ))}
-              </select>
-            </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={toChainId}
+              onChange={(e) => setToChainId(Number(e.target.value) as SupportedChainId)}
+              className={SELECT_CLASS}
+            >
+              {CHAINS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={toToken.symbol}
+              onChange={(e) => {
+                const t = TOKENS[toChainId].find((tok) => tok.symbol === e.target.value)
+                if (t) setToToken(t)
+              }}
+              className={SELECT_CLASS}
+            >
+              {TOKENS[toChainId]?.map((t) => (
+                <option key={t.symbol} value={t.symbol}>
+                  {t.symbol}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="text-2xl font-medium text-white">
+            {outputAmount
+              ? Number(outputAmount).toLocaleString(undefined, { maximumFractionDigits: 6 })
+              : '0.0'}
           </div>
         </div>
 
-        {quote && outputAmount && (
-          <div className="space-y-1.5 px-1 text-xs text-gray-400">
-            <div className="flex justify-between">
-              <span>Estimated Time</span>
-              <span>~{quote.expectedFillTime || quote.expectedFillTimeSec || 2}s</span>
+        {feeUsd && (
+          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4 text-sm">
+            <div className="flex justify-between text-gray-400">
+              <span>Estimated fee</span>
+              <span className="text-white">${Number(feeUsd).toFixed(2)}</span>
             </div>
-            {feeUsd && (
-              <div className="flex justify-between">
-                <span>Fee</span>
-                <span>
-                  ${Number(feeUsd).toFixed(4)} {feePct ? `(${feePct}%)` : ''}
-                </span>
+            {feePct && (
+              <div className="flex justify-between text-gray-400">
+                <span>Fee %</span>
+                <span className="text-white">{feePct}%</span>
               </div>
             )}
-            <div className="flex justify-between">
-              <span>Protocol</span>
-              <span>Across</span>
-            </div>
           </div>
         )}
 
-        {error && <p className="text-center text-sm text-red-400">{error}</p>}
+        {error && (
+          <p className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-center text-sm text-red-400">
+            {error}
+          </p>
+        )}
 
         <button
           onClick={handleBridge}
-          disabled={buttonDisabled}
-          className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
+          disabled={
+            !isConnected ||
+            isPending ||
+            isConfirming ||
+            status === 'approving' ||
+            status === 'bridging' ||
+            !quote?.swapTx ||
+            wrongNetwork ||
+            isSwitching
+          }
+          className="w-full rounded-xl bg-white py-3.5 text-sm font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
           {buttonLabel}
         </button>
-      </div>
 
-      <div className="w-full max-w-md space-y-5 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-        <h3 className="text-lg font-semibold text-white">Details</h3>
-
-        <div className="space-y-4 text-sm">
-          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
-            <p className="text-xs text-gray-500">Protocol</p>
-            <p className="font-medium text-white">Across Protocol</p>
-            <p className="mt-1 text-xs leading-relaxed text-gray-500">
-              Fastest bridging with ~2 second fills
-            </p>
-          </div>
-
-          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
-            <p className="text-xs text-gray-500">Route</p>
-            <p className="font-medium text-white">
-              {CHAINS.find((c) => c.id === fromChainId)?.name} →{' '}
-              {CHAINS.find((c) => c.id === toChainId)?.name}
-            </p>
-          </div>
-
-          {quote && (
-            <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
-              <p className="text-xs text-gray-500">Expected Output</p>
-              <p className="font-medium text-white">
-                {outputAmount ? Number(outputAmount).toFixed(6) : '—'} {toToken.symbol}
-              </p>
-            </div>
-          )}
-
-          <div className="space-y-4 rounded-xl border border-white/10 bg-black/40 p-4">
-            <p className="mb-2 text-xs text-gray-500">Transaction Progress</p>
-            {[
-              { id: 1, label: 'Confirm in wallet' },
-              { id: 2, label: 'Transaction pending' },
-              { id: 3, label: 'Bridge completed' },
-            ].map((step) => (
-              <div key={step.id} className="flex items-center gap-3">
-                <div
-                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                    currentStep >= step.id ? 'bg-white text-black' : 'bg-white/5 text-gray-500'
-                  }`}
-                >
-                  {currentStep > step.id ? '✓' : step.id}
-                </div>
-                <span className={`text-sm ${currentStep >= step.id ? 'text-white' : 'text-gray-500'}`}>
-                  {step.label}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          {txHash && (
-            <div className="space-y-2 rounded-xl border border-white/10 bg-black/40 p-4">
-              <p className="text-xs text-gray-500">Transaction</p>
-              <a
-                href={`https://basescan.org/tx/${txHash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="break-all font-mono text-xs text-blue-400/45 transition hover:text-blue-300/75"
+        <div className="space-y-4 rounded-xl border border-white/10 bg-black/40 p-4">
+          <p className="mb-2 text-xs text-gray-500">Transaction Progress</p>
+          {[
+            { id: 1, label: 'Approve / confirm in wallet' },
+            { id: 2, label: 'Transaction pending' },
+            { id: 3, label: 'Bridge completed' },
+          ].map((step) => (
+            <div key={step.id} className="flex items-center gap-3">
+              <div
+                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                  currentStep >= step.id
+                    ? 'bg-white text-black'
+                    : 'bg-white/5 text-gray-500'
+                }`}
               >
-                View on Explorer ↗
-              </a>
+                {step.id}
+              </div>
+              <span
+                className={`text-sm ${
+                  currentStep >= step.id ? 'text-white' : 'text-gray-500'
+                }`}
+              >
+                {step.label}
+              </span>
             </div>
-          )}
+          ))}
         </div>
       </div>
     </div>
