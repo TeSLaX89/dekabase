@@ -70,37 +70,37 @@ export function Swap() {
   const insufficient =
     isConnected && sellAmountRaw > BigInt(0) && sellAmountRaw > sellBalanceRaw
 
-  useEffect(() => {
-    const loadBalance = async () => {
-      if (!address || !publicClient) {
-        setSellBalanceRaw(BigInt(0))
-        setSellBalanceFormatted('0')
-        return
-      }
+  const loadBalance = async () => {
+  if (!address || !publicClient) {
+    setSellBalanceRaw(BigInt(0))
+    setSellBalanceFormatted('0')
+    return
+  }
 
-      try {
-        if (isNativeSell) {
-          const bal = await publicClient.getBalance({ address })
-          setSellBalanceRaw(bal)
-          setSellBalanceFormatted(formatUnits(bal, 18))
-        } else {
-          const bal = await publicClient.readContract({
-            address: sellToken.address as `0x${string}`,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [address],
-          })
-          setSellBalanceRaw(bal as bigint)
-          setSellBalanceFormatted(formatUnits(bal as bigint, sellToken.decimals))
-        }
-      } catch {
-        setSellBalanceRaw(BigInt(0))
-        setSellBalanceFormatted('0')
-      }
+  try {
+    if (isNativeSell) {
+      const bal = await publicClient.getBalance({ address })
+      setSellBalanceRaw(bal)
+      setSellBalanceFormatted(formatUnits(bal, 18))
+    } else {
+      const bal = await publicClient.readContract({
+        address: sellToken.address as `0x${string}`,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [address],
+      })
+      setSellBalanceRaw(bal as bigint)
+      setSellBalanceFormatted(formatUnits(bal as bigint, sellToken.decimals))
     }
+  } catch {
+    setSellBalanceRaw(BigInt(0))
+    setSellBalanceFormatted('0')
+  }
+}
 
-    loadBalance()
-  }, [address, sellToken, publicClient, isNativeSell])
+useEffect(() => {
+  loadBalance()
+}, [address, sellToken, publicClient, isNativeSell])
 
   const setPercentage = (percent: number) => {
     if (!isConnected || sellBalanceRaw === BigInt(0)) return
@@ -186,7 +186,7 @@ export function Swap() {
   if (isSuccess && txHash && address && scoredRef.current !== txHash) {
     scoredRef.current = txHash
     setStatus('idle')
-    setSellToken((t) => ({ ...t }))
+    loadBalance()
     fetch('/api/leaderboard/add-site-score', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
