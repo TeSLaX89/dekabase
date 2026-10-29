@@ -276,16 +276,14 @@ export function Swap() {
       setStatus('swapping')
 
       sendTransaction({
-        to: activeQuote.transaction.to as `0x${string}`,
-        data: concat([
-          activeQuote.transaction.data as `0x${string}`,
-          DATA_SUFFIX,
-        ]),
-        value: activeQuote.transaction.value
-          ? BigInt(activeQuote.transaction.value)
-          : undefined,
-        chainId: base.id,
-      })
+  to: activeQuote.transaction.to as `0x${string}`,
+  data: activeQuote.transaction.data as `0x${string}`,
+  value: activeQuote.transaction.value
+    ? BigInt(activeQuote.transaction.value)
+    : undefined,
+  chainId: base.id,
+  dataSuffix: DATA_SUFFIX,
+})
     } catch (err: any) {
       setError(err.shortMessage || err.message || 'Swap failed')
       setStatus('idle')
@@ -407,68 +405,77 @@ export function Swap() {
               value={sellAmount}
               onChange={(e) => setSellAmount(e.target.value)}
               placeholder="0.0"
-              className="w-full bg-transparent text-2xl font-medium text-white outline-none placeholder:text-gray-600"
+              className="w-full bg-transparent text-2xl font-semibold outline-none"
             />
             <select
               value={sellToken.symbol}
-              onChange={(e) =>
-                setSellToken(TOKENS.find((t) => t.symbol === e.target.value) || TOKENS[0])
-              }
+              onChange={(e) => {
+                const t = TOKENS.find((x) => x.symbol === e.target.value)
+                if (!t) return
+                setSellToken(t)
+                if (t.symbol === buyToken.symbol) {
+                  const other = TOKENS.find((x) => x.symbol !== t.symbol)
+                  if (other) setBuyToken(other)
+                }
+              }}
               className={SELECT_CLASS}
             >
               {TOKENS.map((t) => (
-                <option key={t.symbol} value={t.symbol}>
+                <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
                   {t.symbol}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="flex gap-2 pt-1">
+          <div className="flex gap-2">
             {[25, 50, 75, 100].map((p) => (
               <button
                 key={p}
                 onClick={() => setPercentage(p)}
-                className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-gray-400 transition hover:bg-white/10 hover:text-white"
+                disabled={!isConnected}
+                className="flex-1 rounded-lg bg-white/5 py-1.5 text-xs transition hover:bg-white/10 disabled:opacity-40"
               >
-                {p}%
+                {p === 100 ? 'Max' : `${p}%`}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="flex justify-center">
+        <div className="-my-1 flex justify-center">
           <button
             onClick={switchTokens}
-            className="rounded-full border border-white/10 bg-white/5 p-2 text-gray-400 transition hover:bg-white/10 hover:text-white"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-lg transition hover:bg-white/10"
           >
-            ↓
+            ⇅
           </button>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-white/10 bg-black/40 p-4">
+        <div className="space-y-2 rounded-xl border border-white/10 bg-black/40 p-4">
           <div className="flex justify-between text-sm text-gray-400">
             <span>You receive</span>
           </div>
-
           <div className="flex items-center gap-3">
-            <div className="w-full text-2xl font-medium text-white">
+            <div className="w-full text-2xl font-semibold">
               {quote?.buyAmount
-                ? Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)).toLocaleString(
-                    undefined,
-                    { maximumFractionDigits: 6 }
-                  )
+                ? Number(formatUnits(BigInt(quote.buyAmount), buyToken.decimals)).toFixed(6)
                 : '0.0'}
             </div>
             <select
               value={buyToken.symbol}
-              onChange={(e) =>
-                setBuyToken(TOKENS.find((t) => t.symbol === e.target.value) || TOKENS[1])
-              }
+              onChange={(e) => {
+                const t = TOKENS.find((x) => x.symbol === e.target.value)
+                if (!t) return
+                setBuyToken(t)
+                if (t.symbol === sellToken.symbol) {
+                  const other = TOKENS.find((x) => x.symbol !== t.symbol)
+                  if (other) setSellToken(other)
+                }
+              }}
               className={SELECT_CLASS}
             >
               {TOKENS.map((t) => (
-                <option key={t.symbol} value={t.symbol}>
+                <option key={t.symbol} value={t.symbol} className="bg-zinc-900 text-white">
                   {t.symbol}
                 </option>
               ))}
@@ -476,18 +483,26 @@ export function Swap() {
           </div>
         </div>
 
-        {rate && (
-          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4 text-sm">
-            <div className="flex justify-between text-gray-400">
+        {quote?.buyAmount && sellAmount && Number(sellAmount) > 0 && !insufficient && (
+          <div className="space-y-1.5 px-1 text-xs text-gray-400">
+            <div className="flex justify-between">
               <span>Rate</span>
-              <span className="text-white">
+              <span>
                 1 {sellToken.symbol} ≈ {rate} {buyToken.symbol}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span>Slippage</span>
+              <span>{slippage}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Platform Fee</span>
+              <span>{involvesUsdt ? '0%' : '0.25%'}</span>
+            </div>
             {minReceived && (
-              <div className="flex justify-between text-gray-400">
-                <span>Minimum received</span>
-                <span className="text-white">
+              <div className="flex justify-between">
+                <span>Minimum Received</span>
+                <span>
                   {minReceived} {buyToken.symbol}
                 </span>
               </div>
@@ -495,60 +510,79 @@ export function Swap() {
           </div>
         )}
 
-        {error && (
-          <p className="rounded-xl border border-red-500/20 bg-red-500/5 px-4 py-3 text-center text-sm text-red-400">
-            {error}
-          </p>
-        )}
+        {error && <p className="text-center text-sm text-red-400">{error}</p>}
 
         <button
           onClick={handleSwap}
           disabled={
             !isConnected ||
             busy ||
-            !quote?.transaction ||
             samePair ||
             insufficient ||
-            !isBase
+            (isBase && !quote?.transaction)
           }
-          className="w-full rounded-xl bg-white py-3.5 text-sm font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
+          className="w-full rounded-xl bg-white py-3.5 font-semibold text-black transition hover:bg-gray-100 disabled:bg-white/10 disabled:text-gray-500"
         >
           {buttonLabel}
         </button>
-
-        <div className="space-y-4 rounded-xl border border-white/10 bg-black/40 p-4">
-          <p className="mb-2 text-xs text-gray-500">Transaction Progress</p>
-          {[
-            { id: 1, label: 'Approve / confirm in wallet' },
-            { id: 2, label: 'Transaction pending' },
-            { id: 3, label: 'Swap completed' },
-          ].map((step) => (
-            <div key={step.id} className="flex items-center gap-3">
-              <div
-                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
-                  currentStep >= step.id
-                    ? 'bg-white text-black'
-                    : 'bg-white/5 text-gray-500'
-                }`}
-              >
-                {step.id}
-              </div>
-              <span
-                className={`text-sm ${
-                  currentStep >= step.id ? 'text-white' : 'text-gray-500'
-                }`}
-              >
-                {step.label}
-              </span>
-            </div>
-          ))}
-        </div>
       </div>
 
-      <div className="w-full max-w-md space-y-4">
-        <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
-          <p className="text-xs text-gray-500">Network</p>
-          <p className="font-medium text-white">Base Mainnet</p>
+      <div className="w-full max-w-md space-y-5 rounded-2xl border border-white/10 bg-white/[0.03] p-6">
+        <h3 className="text-lg font-semibold text-white">Details</h3>
+
+        <div className="space-y-4 text-sm">
+          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
+            <p className="text-xs text-gray-500">Aggregator</p>
+            <p className="font-medium text-white">Powered by 0x</p>
+            <p className="mt-1 text-xs leading-relaxed text-gray-500">
+              Best price routing across Base DEXs
+            </p>
+          </div>
+
+          <div className="space-y-1 rounded-xl border border-white/10 bg-black/40 p-4">
+            <p className="text-xs text-gray-500">Network</p>
+            <p className="font-medium text-white">Base Mainnet</p>
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-white/10 bg-black/40 p-4">
+            <p className="mb-2 text-xs text-gray-500">Transaction Progress</p>
+            {[
+              { id: 1, label: 'Approve / confirm in wallet' },
+              { id: 2, label: 'Transaction pending' },
+              { id: 3, label: 'Swap completed' },
+            ].map((step) => (
+              <div key={step.id} className="flex items-center gap-3">
+                <div
+                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                    currentStep >= step.id
+                      ? 'bg-white text-black'
+                      : 'bg-white/5 text-gray-500'
+                  }`}
+                >
+                  {currentStep > step.id ? '✓' : step.id}
+                </div>
+                <span
+                  className={`text-sm ${currentStep >= step.id ? 'text-white' : 'text-gray-500'}`}
+                >
+                  {step.label}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {txHash && (
+            <div className="space-y-2 rounded-xl border border-white/10 bg-black/40 p-4">
+              <p className="text-xs text-gray-500">Transaction</p>
+              <a
+                href={`https://basescan.org/tx/${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all font-mono text-xs text-blue-400/45 transition hover:text-blue-300/75"
+              >
+                View on Basescan ↗
+              </a>
+            </div>
+          )}
         </div>
       </div>
     </div>
